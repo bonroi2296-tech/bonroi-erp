@@ -14,29 +14,24 @@ const SUPPLIER = {
   ceo: "강주영",
   address: "서울시 강서구 강서로 385, 613호",
   phone: "070-7500-7795",
-  fax: "",
+  fax: "02-6455-7049",
   bankInfo: "기업 011-129417-04-020   예 금 주 : 본 로 이",
 };
 
-// 병원별 추가 정보 (DB에 없는 필드)
+// 병원별 추가 정보
 const BRANCH_EXTRA: Record<string, { phone: string; receiver: string }> = {
   "광명면력한방병원": { phone: "0507-1331-1076", receiver: "황미숙" },
   "강서면력한방병원": { phone: "", receiver: "" },
   "신촌면력한방병원": { phone: "", receiver: "" },
 };
 
-// raw_product_name에서 품목명/규격 분리 ("ㅡ" 구분)
+// raw_product_name에서 품목명/규격 분리
 function splitProductName(raw: string): { name: string; spec: string } {
   const parts = raw.split(" ㅡ ");
   if (parts.length >= 2) {
     return { name: parts[0].trim(), spec: parts.slice(1).join(" ㅡ ").trim() };
   }
   return { name: raw.trim(), spec: "" };
-}
-
-// 날짜 포맷: "2026-03-11" → "26-03-11"
-function shortDate(dateStr: string): string {
-  return dateStr.substring(2); // "2026-03-11" → "26-03-11"
 }
 
 // 공통 테두리 스타일
@@ -47,17 +42,36 @@ const thinBorder: Partial<ExcelJS.Borders> = {
   right: { style: "thin" },
 };
 
-// mediumBorder는 개별 셀에서 직접 사용
+// 연한 초록 배경색 (참조 서식 theme 6 tint 0.8 근사값)
+const lightGreenFill: ExcelJS.Fill = {
+  type: "pattern",
+  pattern: "solid",
+  fgColor: { argb: "FFE2EFDA" },
+};
 
-// 셀 스타일 적용 헬퍼
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function styleHeaderCell(cell: ExcelJS.Cell, fontSize = 11, bold = true) {
   cell.font = { name: "맑은 고딕", size: fontSize, bold };
   cell.alignment = { horizontal: "center", vertical: "middle" };
   cell.border = thinBorder;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function styleDataCell(cell: ExcelJS.Cell, fontSize = 10, horizontal: "left" | "center" | "right" = "left") {
   cell.font = { name: "맑은 고딕", size: fontSize };
+  cell.alignment = { horizontal, vertical: "middle", wrapText: true };
+  cell.border = thinBorder;
+}
+
+// 자료입력 시트용 스타일 (폰트: 굴림)
+function styleSheet1Header(cell: ExcelJS.Cell, fontSize = 11, bold = true) {
+  cell.font = { name: "굴림", size: fontSize, bold };
+  cell.alignment = { horizontal: "center", vertical: "middle" };
+  cell.border = thinBorder;
+}
+
+function styleSheet1Data(cell: ExcelJS.Cell, fontSize = 10, horizontal: "left" | "center" | "right" = "left") {
+  cell.font = { name: "굴림", size: fontSize };
   cell.alignment = { horizontal, vertical: "middle", wrapText: true };
   cell.border = thinBorder;
 }
@@ -115,7 +129,7 @@ export async function GET(request: NextRequest) {
     name: string;
     spec: string;
     qty: number;
-    price: number; // supply_price (VAT 미포함 단가)
+    price: number;
     edi: string;
   }
   const dateGroups: Map<string, ItemRow[]> = new Map();
@@ -153,25 +167,25 @@ export async function GET(request: NextRequest) {
   const ws1 = wb.addWorksheet("자료입력");
 
   // 열 너비
-  ws1.getColumn(1).width = 5.5;   // A
-  ws1.getColumn(2).width = 16;    // B
-  ws1.getColumn(3).width = 12;    // C
-  ws1.getColumn(4).width = 9.5;   // D
-  ws1.getColumn(5).width = 22.5;  // E
-  ws1.getColumn(6).width = 15.5;  // F
-  ws1.getColumn(7).width = 15.5;  // G
-  ws1.getColumn(8).width = 13;    // H
-  ws1.getColumn(9).width = 12;    // I
-  ws1.getColumn(10).width = 14.5; // J
+  ws1.getColumn(1).width = 5.5;
+  ws1.getColumn(2).width = 16;
+  ws1.getColumn(3).width = 12;
+  ws1.getColumn(4).width = 9.5;
+  ws1.getColumn(5).width = 22.5;
+  ws1.getColumn(6).width = 15.5;
+  ws1.getColumn(7).width = 15.5;
+  ws1.getColumn(8).width = 13;
+  ws1.getColumn(9).width = 12;
+  ws1.getColumn(10).width = 14.5;
 
-  // Row 2: 공급자 / 공급받는자 헤더
+  // Row 2: 공급자 / 공급받는자 헤더 (폰트: 굴림 14)
   const r2 = ws1.getRow(2);
   r2.getCell(2).value = "공급자";
-  r2.getCell(2).font = { name: "맑은 고딕", size: 12, bold: true };
+  r2.getCell(2).font = { name: "굴림", size: 14, bold: true };
   r2.getCell(7).value = "공급받는자";
-  r2.getCell(7).font = { name: "맑은 고딕", size: 12, bold: true };
+  r2.getCell(7).font = { name: "굴림", size: 14, bold: true };
 
-  // 공급자 정보 (B4-B9)
+  // 공급자 정보 (B4-B9) - 폰트: 굴림
   const supplierRows: [string, string][] = [
     ["상호", SUPPLIER.name],
     ["사업자등록번호", SUPPLIER.bizNo],
@@ -194,33 +208,34 @@ export async function GET(request: NextRequest) {
   for (let i = 0; i < supplierRows.length; i++) {
     const row = ws1.getRow(4 + i);
     row.getCell(2).value = supplierRows[i][0];
-    styleHeaderCell(row.getCell(2), 10);
+    styleSheet1Header(row.getCell(2), 11);
     ws1.mergeCells(4 + i, 3, 4 + i, 5);
     row.getCell(3).value = supplierRows[i][1];
-    styleDataCell(row.getCell(3), 10, "center");
+    styleSheet1Data(row.getCell(3), 11, "center");
 
     if (receiverRows[i] && receiverRows[i].length === 2) {
       row.getCell(7).value = receiverRows[i][0];
-      styleHeaderCell(row.getCell(7), 10);
+      styleSheet1Header(row.getCell(7), 11);
       ws1.mergeCells(4 + i, 8, 4 + i, 10);
       row.getCell(8).value = receiverRows[i][1];
-      styleDataCell(row.getCell(8), 10, "center");
+      styleSheet1Data(row.getCell(8), 11, "center");
     }
   }
 
   // Row 11: "자료입력" 라벨
   ws1.getRow(11).getCell(2).value = "자료입력";
-  ws1.getRow(11).getCell(2).font = { name: "맑은 고딕", size: 11, bold: true };
+  ws1.getRow(11).getCell(2).font = { name: "굴림", size: 11, bold: true };
 
   // Row 13: 작성일
   ws1.getRow(13).getCell(2).value = "작성일,일시";
-  styleHeaderCell(ws1.getRow(13).getCell(2), 10);
+  styleSheet1Header(ws1.getRow(13).getCell(2), 10);
   ws1.mergeCells(13, 3, 13, 4);
   const today = new Date();
   ws1.getRow(13).getCell(3).value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  styleDataCell(ws1.getRow(13).getCell(3), 10, "center");
+  styleSheet1Data(ws1.getRow(13).getCell(3), 10, "center");
 
   // Row 14: 컬럼 헤더
+  ws1.mergeCells(14, 3, 14, 5);
   const headers14 = [
     { col: 3, text: "품목" },
     { col: 6, text: "규격" },
@@ -230,29 +245,26 @@ export async function GET(request: NextRequest) {
     { col: 10, text: "발행금액" },
   ];
   for (const h of headers14) {
-    ws1.mergeCells(14, 3, 14, 5); // 품목은 C:E 병합
     const cell = ws1.getRow(14).getCell(h.col);
     cell.value = h.text;
-    styleHeaderCell(cell, 10);
+    styleSheet1Header(cell, 10);
   }
 
   // Row 15+: 아이템 데이터
   let dataRow = 15;
   let itemNum = 1;
-  // 자료입력 시트의 각 행이 날짜헤더인지 아이템인지 추적
   const rowTypes: Array<"date" | "item"> = [];
 
   for (const [dateStr, items] of Array.from(dateGroups.entries())) {
-    // 날짜 헤더 행
+    // 날짜 헤더 행 — 전체 날짜 + "발주건"
     const dateHeaderRow = ws1.getRow(dataRow);
     dateHeaderRow.getCell(2).value = `품목 ${itemNum}`;
-    styleDataCell(dateHeaderRow.getCell(2), 10, "center");
+    styleSheet1Data(dateHeaderRow.getCell(2), 10, "center");
     ws1.mergeCells(dataRow, 3, dataRow, 5);
-    dateHeaderRow.getCell(3).value = `${shortDate(dateStr)} 주문`;
-    styleDataCell(dateHeaderRow.getCell(3), 10, "left");
-    // J열에 빈 수식 (=G*H 패턴 유지)
+    dateHeaderRow.getCell(3).value = `${dateStr} 발주건`;
+    styleSheet1Data(dateHeaderRow.getCell(3), 10, "left");
     dateHeaderRow.getCell(10).value = { formula: `G${dataRow}*H${dataRow}` };
-    styleDataCell(dateHeaderRow.getCell(10), 10, "right");
+    styleSheet1Data(dateHeaderRow.getCell(10), 10, "right");
     dateHeaderRow.getCell(10).numFmt = "#,##0";
     rowTypes.push("date");
     dataRow++;
@@ -262,22 +274,22 @@ export async function GET(request: NextRequest) {
     for (const item of items) {
       const row = ws1.getRow(dataRow);
       row.getCell(2).value = `품목 ${itemNum}`;
-      styleDataCell(row.getCell(2), 10, "center");
+      styleSheet1Data(row.getCell(2), 10, "center");
       ws1.mergeCells(dataRow, 3, dataRow, 5);
       row.getCell(3).value = item.name;
-      styleDataCell(row.getCell(3), 10, "left");
+      styleSheet1Data(row.getCell(3), 10, "left");
       row.getCell(6).value = item.spec;
-      styleDataCell(row.getCell(6), 10, "center");
+      styleSheet1Data(row.getCell(6), 10, "center");
       row.getCell(7).value = item.qty;
-      styleDataCell(row.getCell(7), 10, "center");
+      styleSheet1Data(row.getCell(7), 10, "center");
       row.getCell(7).numFmt = "#,##0";
       row.getCell(8).value = item.price;
-      styleDataCell(row.getCell(8), 10, "right");
+      styleSheet1Data(row.getCell(8), 10, "right");
       row.getCell(8).numFmt = "#,##0";
       row.getCell(9).value = item.edi;
-      styleDataCell(row.getCell(9), 10, "center");
+      styleSheet1Data(row.getCell(9), 10, "center");
       row.getCell(10).value = { formula: `G${dataRow}*H${dataRow}` };
-      styleDataCell(row.getCell(10), 10, "right");
+      styleSheet1Data(row.getCell(10), 10, "right");
       row.getCell(10).numFmt = "#,##0";
       rowTypes.push("item");
       dataRow++;
@@ -285,38 +297,38 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const totalDataRows = dataRow - 15; // 자료입력에 들어간 행 수
+  const totalDataRows = dataRow - 15;
   const lastDataRow = dataRow - 1;
 
-  // 합계 행들 (자료입력 하단)
+  // 합계 행들
   const sumRow1 = dataRow + 1;
   const sumRow2 = dataRow + 2;
   ws1.mergeCells(sumRow1, 6, sumRow1, 10);
   ws1.getRow(sumRow1).getCell(6).value = { formula: `SUM(J15:J${lastDataRow})` };
   ws1.getRow(sumRow1).getCell(6).numFmt = "#,##0";
-  styleDataCell(ws1.getRow(sumRow1).getCell(6), 11, "right");
-  ws1.getRow(sumRow1).getCell(6).font = { name: "맑은 고딕", size: 11, bold: true };
+  styleSheet1Data(ws1.getRow(sumRow1).getCell(6), 11, "right");
+  ws1.getRow(sumRow1).getCell(6).font = { name: "굴림", size: 11, bold: true };
 
   ws1.mergeCells(sumRow2, 6, sumRow2, 10);
   ws1.getRow(sumRow2).getCell(6).value = { formula: `F${sumRow1}*1.1` };
   ws1.getRow(sumRow2).getCell(6).numFmt = "#,##0";
-  styleDataCell(ws1.getRow(sumRow2).getCell(6), 11, "right");
-  ws1.getRow(sumRow2).getCell(6).font = { name: "맑은 고딕", size: 11, bold: true };
+  styleSheet1Data(ws1.getRow(sumRow2).getCell(6), 11, "right");
+  ws1.getRow(sumRow2).getCell(6).font = { name: "굴림", size: 11, bold: true };
 
   // ========== Sheet 2: 거래명세서 양식 ==========
   const ws2 = wb.addWorksheet("거래명세서 양식");
 
   // 열 너비
-  ws2.getColumn(1).width = 2;     // A (여백)
-  ws2.getColumn(2).width = 5.5;   // B
-  ws2.getColumn(3).width = 11;    // C
-  ws2.getColumn(4).width = 14;    // D
-  ws2.getColumn(5).width = 11;    // E (규격)
-  ws2.getColumn(6).width = 7;     // F (수량)
-  ws2.getColumn(7).width = 11;    // G (단가)
-  ws2.getColumn(8).width = 13;    // H (공급가액)
-  ws2.getColumn(9).width = 10;    // I (세액)
-  ws2.getColumn(10).width = 13;   // J (EDI코드)
+  ws2.getColumn(1).width = 2;
+  ws2.getColumn(2).width = 5.5;
+  ws2.getColumn(3).width = 11;
+  ws2.getColumn(4).width = 14;
+  ws2.getColumn(5).width = 11;
+  ws2.getColumn(6).width = 7;
+  ws2.getColumn(7).width = 11;
+  ws2.getColumn(8).width = 13;
+  ws2.getColumn(9).width = 10;
+  ws2.getColumn(10).width = 13;
 
   // === Row 2: 타이틀 ===
   ws2.mergeCells("B2:J2");
@@ -335,14 +347,22 @@ export async function GET(request: NextRequest) {
   ws2.getRow(3).getCell(2).value = "발 행 일";
   styleHeaderCell(ws2.getRow(3).getCell(2), 11);
   ws2.getRow(3).getCell(2).border = { ...thinBorder, left: { style: "medium" } };
+
   ws2.mergeCells("C3:E3");
-  ws2.getRow(3).getCell(3).value = `${year}년 ${mon}월`;
-  styleDataCell(ws2.getRow(3).getCell(3), 10, "center");
+  // 발행일 = 오늘 날짜 (Date 객체 + numFmt)
+  ws2.getRow(3).getCell(3).value = new Date();
+  ws2.getRow(3).getCell(3).numFmt = 'yyyy"년" m"월" d"일";@';
+  ws2.getRow(3).getCell(3).font = { name: "맑은 고딕", size: 10, bold: true };
+  ws2.getRow(3).getCell(3).alignment = { horizontal: "center", vertical: "middle" };
   ws2.getRow(3).getCell(3).border = thinBorder;
+
+  // 공급자 — F3:J3 병합
+  ws2.mergeCells("F3:J3");
   ws2.getRow(3).getCell(6).value = "공 급 자";
-  styleHeaderCell(ws2.getRow(3).getCell(6), 10);
+  ws2.getRow(3).getCell(6).font = { name: "맑은 고딕", size: 10, bold: true };
+  ws2.getRow(3).getCell(6).alignment = { horizontal: "center", vertical: "middle" };
   ws2.getRow(3).getCell(6).border = { ...thinBorder, right: { style: "medium" } };
-  // F3은 G~J를 커버하지 않으므로 별도 처리 불필요
+  ws2.getRow(3).getCell(6).fill = lightGreenFill;
 
   // === Row 4-5: 상호/사업자번호/업체명/대표 ===
   // Row 4
@@ -350,13 +370,19 @@ export async function GET(request: NextRequest) {
   ws2.getRow(4).getCell(2).value = "상 호";
   styleHeaderCell(ws2.getRow(4).getCell(2), 11);
   ws2.getRow(4).getCell(2).border = { ...thinBorder, left: { style: "medium" } };
+
   ws2.mergeCells("C4:E5");
   ws2.getRow(4).getCell(3).value = branchName;
   ws2.getRow(4).getCell(3).font = { name: "맑은 고딕", size: 11, bold: true };
   ws2.getRow(4).getCell(3).alignment = { horizontal: "center", vertical: "middle" };
   ws2.getRow(4).getCell(3).border = thinBorder;
+
   ws2.getRow(4).getCell(6).value = "사업자번호";
-  styleHeaderCell(ws2.getRow(4).getCell(6), 9);
+  ws2.getRow(4).getCell(6).font = { name: "맑은 고딕", size: 9, bold: true };
+  ws2.getRow(4).getCell(6).alignment = { horizontal: "center", vertical: "middle" };
+  ws2.getRow(4).getCell(6).border = thinBorder;
+  ws2.getRow(4).getCell(6).fill = lightGreenFill;
+
   ws2.mergeCells("G4:J4");
   ws2.getRow(4).getCell(7).value = SUPPLIER.bizNo;
   styleDataCell(ws2.getRow(4).getCell(7), 10, "center");
@@ -364,86 +390,135 @@ export async function GET(request: NextRequest) {
 
   // Row 5
   ws2.getRow(5).getCell(6).value = "업체명";
-  styleHeaderCell(ws2.getRow(5).getCell(6), 10);
+  ws2.getRow(5).getCell(6).font = { name: "맑은 고딕", size: 10, bold: true };
+  ws2.getRow(5).getCell(6).alignment = { horizontal: "center", vertical: "middle" };
+  ws2.getRow(5).getCell(6).border = thinBorder;
+  ws2.getRow(5).getCell(6).fill = lightGreenFill;
+
   ws2.getRow(5).getCell(7).value = SUPPLIER.name;
-  styleDataCell(ws2.getRow(5).getCell(7), 10, "center");
+  ws2.getRow(5).getCell(7).font = { name: "맑은 고딕", size: 10 };
+  ws2.getRow(5).getCell(7).alignment = { horizontal: "center", vertical: "middle" };
+  ws2.getRow(5).getCell(7).border = thinBorder;
+
   ws2.getRow(5).getCell(8).value = "대 표";
-  styleHeaderCell(ws2.getRow(5).getCell(8), 10);
+  ws2.getRow(5).getCell(8).font = { name: "맑은 고딕", size: 10, bold: true };
+  ws2.getRow(5).getCell(8).alignment = { horizontal: "center", vertical: "middle" };
+  ws2.getRow(5).getCell(8).border = thinBorder;
+  ws2.getRow(5).getCell(8).fill = lightGreenFill;
+
   ws2.mergeCells("I5:J5");
-  ws2.getRow(5).getCell(9).value = SUPPLIER.ceo;
-  styleDataCell(ws2.getRow(5).getCell(9), 10, "center");
+  ws2.getRow(5).getCell(9).value = `${SUPPLIER.ceo}  (인)`;
+  ws2.getRow(5).getCell(9).font = { name: "맑은 고딕", size: 10 };
+  ws2.getRow(5).getCell(9).alignment = { horizontal: "center", vertical: "middle" };
   ws2.getRow(5).getCell(9).border = { ...thinBorder, right: { style: "medium" } };
 
   // === Row 6: 주소 ===
   ws2.getRow(6).getCell(2).value = "주 소";
   styleHeaderCell(ws2.getRow(6).getCell(2), 11);
   ws2.getRow(6).getCell(2).border = { ...thinBorder, left: { style: "medium" } };
+
   ws2.mergeCells("C6:E6");
   ws2.getRow(6).getCell(3).value = branchAddress;
-  styleDataCell(ws2.getRow(6).getCell(3), 9, "center");
+  ws2.getRow(6).getCell(3).font = { name: "맑은 고딕", size: 12, bold: true };
+  ws2.getRow(6).getCell(3).alignment = { horizontal: "center", vertical: "middle" };
+  ws2.getRow(6).getCell(3).border = thinBorder;
+
   ws2.getRow(6).getCell(6).value = "주 소";
-  styleHeaderCell(ws2.getRow(6).getCell(6), 10);
+  ws2.getRow(6).getCell(6).font = { name: "맑은 고딕", size: 10, bold: true };
+  ws2.getRow(6).getCell(6).alignment = { horizontal: "center", vertical: "middle" };
+  ws2.getRow(6).getCell(6).border = thinBorder;
+  ws2.getRow(6).getCell(6).fill = lightGreenFill;
+
   ws2.mergeCells("G6:J6");
   ws2.getRow(6).getCell(7).value = SUPPLIER.address;
-  styleDataCell(ws2.getRow(6).getCell(7), 9, "center");
+  ws2.getRow(6).getCell(7).font = { name: "맑은 고딕", size: 10 };
+  ws2.getRow(6).getCell(7).alignment = { horizontal: "center", vertical: "middle" };
   ws2.getRow(6).getCell(7).border = { ...thinBorder, right: { style: "medium" } };
 
   // === Row 7: 총합계 / 전화 / 팩스 ===
   ws2.getRow(7).getCell(2).value = "총 합계\n(VAT 포함)";
-  styleHeaderCell(ws2.getRow(7).getCell(2), 10);
+  ws2.getRow(7).getCell(2).font = { name: "맑은 고딕", size: 12, bold: true };
   ws2.getRow(7).getCell(2).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
   ws2.getRow(7).getCell(2).border = { ...thinBorder, left: { style: "medium" } };
+  ws2.getRow(7).getCell(2).fill = lightGreenFill;
+
   ws2.mergeCells("C7:E7");
-  // 총합계 = 공급가액 합계 + 세액 합계 (동적 행 번호 사용)
-  const invoiceLastDataRow = 9 + totalDataRows; // Row 10이 첫 데이터, Row 9+totalDataRows가 마지막
+  const invoiceLastDataRow = 9 + totalDataRows;
   const totalSumRow = invoiceLastDataRow + 1;
   ws2.getRow(7).getCell(3).value = { formula: `E${totalSumRow}+H${totalSumRow}` };
-  ws2.getRow(7).getCell(3).numFmt = "#,##0";
-  ws2.getRow(7).getCell(3).font = { name: "맑은 고딕", size: 14, bold: true };
+  ws2.getRow(7).getCell(3).numFmt = '"₩"#,##0_);[Red]("₩"#,##0)';
+  ws2.getRow(7).getCell(3).font = { name: "맑은 고딕", size: 12, bold: true };
   ws2.getRow(7).getCell(3).alignment = { horizontal: "center", vertical: "middle" };
   ws2.getRow(7).getCell(3).border = thinBorder;
+  ws2.getRow(7).getCell(3).fill = lightGreenFill;
+
   ws2.getRow(7).getCell(6).value = "전화";
-  styleHeaderCell(ws2.getRow(7).getCell(6), 10);
+  ws2.getRow(7).getCell(6).font = { name: "맑은 고딕", size: 10, bold: true };
+  ws2.getRow(7).getCell(6).alignment = { horizontal: "center", vertical: "middle" };
+  ws2.getRow(7).getCell(6).border = thinBorder;
+  ws2.getRow(7).getCell(6).fill = lightGreenFill;
+
   ws2.getRow(7).getCell(7).value = SUPPLIER.phone;
-  styleDataCell(ws2.getRow(7).getCell(7), 10, "center");
+  ws2.getRow(7).getCell(7).font = { name: "맑은 고딕", size: 9 };
+  ws2.getRow(7).getCell(7).alignment = { horizontal: "center", vertical: "middle" };
+  ws2.getRow(7).getCell(7).border = thinBorder;
+
   ws2.getRow(7).getCell(8).value = "팩스";
-  styleHeaderCell(ws2.getRow(7).getCell(8), 10);
+  ws2.getRow(7).getCell(8).font = { name: "맑은 고딕", size: 10, bold: true };
+  ws2.getRow(7).getCell(8).alignment = { horizontal: "center", vertical: "middle" };
+  ws2.getRow(7).getCell(8).border = thinBorder;
+  ws2.getRow(7).getCell(8).fill = lightGreenFill;
+
   ws2.mergeCells("I7:J7");
   ws2.getRow(7).getCell(9).value = SUPPLIER.fax;
+  ws2.getRow(7).getCell(9).font = { name: "맑은 고딕", size: 9 };
+  ws2.getRow(7).getCell(9).alignment = { horizontal: "center", vertical: "middle" };
   ws2.getRow(7).getCell(9).border = { ...thinBorder, right: { style: "medium" } };
   ws2.getRow(7).height = 30;
 
-  // === Row 8: 계좌번호 ===
+  // === Row 8: 계좌번호 (center 정렬) ===
   ws2.mergeCells("B8:D8");
   ws2.getRow(8).getCell(2).value = SUPPLIER.bankInfo;
-  ws2.getRow(8).getCell(2).font = { name: "맑은 고딕", size: 9, bold: true };
-  ws2.getRow(8).getCell(2).alignment = { horizontal: "left", vertical: "middle" };
+  ws2.getRow(8).getCell(2).font = { name: "맑은 고딕", size: 10, bold: true };
+  ws2.getRow(8).getCell(2).alignment = { horizontal: "center", vertical: "middle" };
   ws2.getRow(8).getCell(2).border = { ...thinBorder, left: { style: "medium" } };
 
-  // === Row 9: 컬럼 헤더 ===
-  // Row 9 컬럼 헤더
+  // === Row 9: 컬럼 헤더 (배경색 추가) ===
   ws2.mergeCells("B9:D9");
   ws2.getRow(9).getCell(2).value = "품    명";
   styleHeaderCell(ws2.getRow(9).getCell(2), 10);
   ws2.getRow(9).getCell(2).border = { ...thinBorder, left: { style: "medium" } };
+  ws2.getRow(9).getCell(2).fill = lightGreenFill;
+
   ws2.getRow(9).getCell(5).value = "규격";
   styleHeaderCell(ws2.getRow(9).getCell(5), 10);
+  ws2.getRow(9).getCell(5).fill = lightGreenFill;
+
   ws2.getRow(9).getCell(6).value = "수량";
   styleHeaderCell(ws2.getRow(9).getCell(6), 10);
+  ws2.getRow(9).getCell(6).fill = lightGreenFill;
+
   ws2.getRow(9).getCell(7).value = "단가";
   styleHeaderCell(ws2.getRow(9).getCell(7), 10);
+  ws2.getRow(9).getCell(7).fill = lightGreenFill;
+
   ws2.getRow(9).getCell(8).value = "공급가액";
   styleHeaderCell(ws2.getRow(9).getCell(8), 10);
+  ws2.getRow(9).getCell(8).fill = lightGreenFill;
+
   ws2.getRow(9).getCell(9).value = "세액";
   styleHeaderCell(ws2.getRow(9).getCell(9), 10);
+  ws2.getRow(9).getCell(9).fill = lightGreenFill;
+
   ws2.getRow(9).getCell(10).value = "EDI 코드";
   styleHeaderCell(ws2.getRow(9).getCell(10), 10);
   ws2.getRow(9).getCell(10).border = { ...thinBorder, right: { style: "medium" } };
+  ws2.getRow(9).getCell(10).fill = lightGreenFill;
   ws2.getRow(9).height = 22;
 
-  // === Row 10+: 데이터 행 (자료입력 시트 참조 수식) ===
+  // === Row 10+: 데이터 행 ===
   let invoiceRow = 10;
-  const dataStartInSheet1 = 15; // 자료입력의 첫 데이터 행
+  const dataStartInSheet1 = 15;
 
   for (let i = 0; i < rowTypes.length; i++) {
     const sheet1Row = dataStartInSheet1 + i;
@@ -454,41 +529,47 @@ export async function GET(request: NextRequest) {
       ws2.mergeCells(invoiceRow, 2, invoiceRow, 10);
       row.getCell(2).value = { formula: `'자료입력'!C${sheet1Row}` };
       row.getCell(2).font = { name: "맑은 고딕", size: 10, bold: true };
-      row.getCell(2).alignment = { horizontal: "left", vertical: "middle" };
+      row.getCell(2).alignment = { horizontal: "center", vertical: "middle" };
       row.getCell(2).border = { ...thinBorder, left: { style: "medium" }, right: { style: "medium" } };
-      row.getCell(2).fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FFF2F2F2" },
-      };
     } else {
-      // 아이템 행: 개별 컬럼
+      // 아이템 행
       ws2.mergeCells(invoiceRow, 2, invoiceRow, 4);
-      row.getCell(2).value = { formula: `'자료입력'!C${sheet1Row}` }; // 품명
-      styleDataCell(row.getCell(2), 9, "left");
+      row.getCell(2).value = { formula: `'자료입력'!C${sheet1Row}` };
+      row.getCell(2).font = { name: "맑은 고딕", size: 10 };
+      row.getCell(2).alignment = { horizontal: "left", vertical: "middle", wrapText: true };
       row.getCell(2).border = { ...thinBorder, left: { style: "medium" } };
 
-      row.getCell(5).value = { formula: `'자료입력'!F${sheet1Row}` }; // 규격
-      styleDataCell(row.getCell(5), 9, "center");
+      row.getCell(5).value = { formula: `'자료입력'!F${sheet1Row}` };
+      row.getCell(5).font = { name: "맑은 고딕", size: 10 };
+      row.getCell(5).alignment = { horizontal: "center", vertical: "middle" };
+      row.getCell(5).border = thinBorder;
 
-      row.getCell(6).value = { formula: `'자료입력'!G${sheet1Row}` }; // 수량
-      styleDataCell(row.getCell(6), 10, "center");
-      row.getCell(6).numFmt = "#,##0";
+      row.getCell(6).value = { formula: `'자료입력'!G${sheet1Row}` };
+      row.getCell(6).font = { name: "맑은 고딕", size: 10 };
+      row.getCell(6).alignment = { horizontal: "center", vertical: "middle" };
+      row.getCell(6).border = thinBorder;
 
-      row.getCell(7).value = { formula: `'자료입력'!H${sheet1Row}` }; // 단가
-      styleDataCell(row.getCell(7), 10, "right");
-      row.getCell(7).numFmt = "#,##0";
+      row.getCell(7).value = { formula: `'자료입력'!H${sheet1Row}` };
+      row.getCell(7).font = { name: "맑은 고딕", size: 10 };
+      row.getCell(7).alignment = { horizontal: "right", vertical: "middle" };
+      row.getCell(7).border = thinBorder;
+      row.getCell(7).numFmt = '"₩"#,##0';
 
-      row.getCell(8).value = { formula: `F${invoiceRow}*G${invoiceRow}` }; // 공급가액
-      styleDataCell(row.getCell(8), 10, "right");
-      row.getCell(8).numFmt = "#,##0";
+      row.getCell(8).value = { formula: `F${invoiceRow}*G${invoiceRow}` };
+      row.getCell(8).font = { name: "맑은 고딕", size: 10 };
+      row.getCell(8).alignment = { horizontal: "right", vertical: "middle" };
+      row.getCell(8).border = thinBorder;
+      row.getCell(8).numFmt = '_-[$₩-412]* #,##0_-;\\-[$₩-412]* #,##0_-;_-[$₩-412]* "-"??_-;_-@_-';
 
-      row.getCell(9).value = { formula: `F${invoiceRow}*G${invoiceRow}*10%` }; // 세액
-      styleDataCell(row.getCell(9), 10, "right");
-      row.getCell(9).numFmt = "#,##0";
+      row.getCell(9).value = { formula: `F${invoiceRow}*G${invoiceRow}*10%` };
+      row.getCell(9).font = { name: "맑은 고딕", size: 10 };
+      row.getCell(9).alignment = { horizontal: "right", vertical: "middle" };
+      row.getCell(9).border = thinBorder;
+      row.getCell(9).numFmt = '_-[$₩-412]* #,##0_-;\\-[$₩-412]* #,##0_-;_-[$₩-412]* "-"??_-;_-@_-';
 
-      row.getCell(10).value = { formula: `'자료입력'!I${sheet1Row}` }; // EDI 코드
-      styleDataCell(row.getCell(10), 9, "center");
+      row.getCell(10).value = { formula: `'자료입력'!I${sheet1Row}` };
+      row.getCell(10).font = { name: "맑은 고딕", size: 10 };
+      row.getCell(10).alignment = { horizontal: "center", vertical: "middle" };
       row.getCell(10).border = { ...thinBorder, right: { style: "medium" } };
     }
     invoiceRow++;
@@ -502,24 +583,31 @@ export async function GET(request: NextRequest) {
   ws2.getRow(sumRowNum).getCell(2).value = "수 량";
   styleHeaderCell(ws2.getRow(sumRowNum).getCell(2), 10);
   ws2.getRow(sumRowNum).getCell(2).border = { ...thinBorder, left: { style: "medium" } };
+
   ws2.getRow(sumRowNum).getCell(3).value = { formula: `SUM(F${firstItemRow}:F${lastItemRow})` };
   ws2.getRow(sumRowNum).getCell(3).numFmt = "#,##0";
-  styleDataCell(ws2.getRow(sumRowNum).getCell(3), 10, "center");
   ws2.getRow(sumRowNum).getCell(3).font = { name: "맑은 고딕", size: 10, bold: true };
+  ws2.getRow(sumRowNum).getCell(3).alignment = { horizontal: "center", vertical: "middle" };
+  ws2.getRow(sumRowNum).getCell(3).border = thinBorder;
+
   ws2.getRow(sumRowNum).getCell(4).value = "공 급 가 액";
   styleHeaderCell(ws2.getRow(sumRowNum).getCell(4), 10);
+
   ws2.mergeCells(sumRowNum, 5, sumRowNum, 6);
   ws2.getRow(sumRowNum).getCell(5).value = { formula: `SUM(H${firstItemRow}:H${lastItemRow})` };
-  ws2.getRow(sumRowNum).getCell(5).numFmt = "#,##0";
-  styleDataCell(ws2.getRow(sumRowNum).getCell(5), 10, "right");
+  ws2.getRow(sumRowNum).getCell(5).numFmt = '#,##0';
   ws2.getRow(sumRowNum).getCell(5).font = { name: "맑은 고딕", size: 10, bold: true };
+  ws2.getRow(sumRowNum).getCell(5).alignment = { horizontal: "right", vertical: "middle" };
+  ws2.getRow(sumRowNum).getCell(5).border = thinBorder;
+
   ws2.getRow(sumRowNum).getCell(7).value = "세액";
   styleHeaderCell(ws2.getRow(sumRowNum).getCell(7), 10);
+
   ws2.mergeCells(sumRowNum, 8, sumRowNum, 10);
   ws2.getRow(sumRowNum).getCell(8).value = { formula: `SUM(I${firstItemRow}:I${lastItemRow})` };
-  ws2.getRow(sumRowNum).getCell(8).numFmt = "#,##0";
-  styleDataCell(ws2.getRow(sumRowNum).getCell(8), 10, "right");
+  ws2.getRow(sumRowNum).getCell(8).numFmt = '#,##0';
   ws2.getRow(sumRowNum).getCell(8).font = { name: "맑은 고딕", size: 10, bold: true };
+  ws2.getRow(sumRowNum).getCell(8).alignment = { horizontal: "right", vertical: "middle" };
   ws2.getRow(sumRowNum).getCell(8).border = { ...thinBorder, right: { style: "medium" } };
 
   // === 기타 사항 ===
@@ -542,24 +630,16 @@ export async function GET(request: NextRequest) {
 
   // 인쇄 설정
   ws2.pageSetup = {
-    paperSize: 9, // A4
+    paperSize: 9,
     orientation: "portrait",
     fitToPage: true,
     fitToWidth: 1,
     fitToHeight: 0,
-    margins: {
-      left: 0.5,
-      right: 0.5,
-      top: 0.5,
-      bottom: 0.5,
-      header: 0.3,
-      footer: 0.3,
-    },
+    margins: { left: 0.5, right: 0.5, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 },
   };
 
   // 엑셀 버퍼 생성
   const buffer = await wb.xlsx.writeBuffer();
-
   const fileName = encodeURIComponent(`${branchName}_${year}년${mon}월_거래명세서.xlsx`);
 
   return new NextResponse(buffer, {
