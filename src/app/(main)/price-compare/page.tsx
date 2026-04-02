@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
-import { Search, ArrowUpDown, TrendingDown, AlertTriangle, X, Plus, Pencil } from "lucide-react";
+import { Search, ArrowUpDown, TrendingDown, AlertTriangle, X, Plus, Pencil, Trash2, Save } from "lucide-react";
 
 interface VendorPrice {
   vendor_name: string;
@@ -36,6 +36,14 @@ interface SimulatedItem {
   vendors: Record<string, number | null>;
 }
 
+// 모달용 편집 폼 데이터
+interface ProductFormData {
+  name: string;
+  spec: string;
+  supply_price: string;
+  vendorPrices: Record<string, string>;
+}
+
 const YANGBANG_VENDORS = ["SD바이오", "주사기닷컴", "디에이치몰", "메디오션", "한백상사"];
 const HANBANG_VENDORS = ["수진메디칼", "안진도매로", "한의나라", "허브원", "케이엠몰"];
 
@@ -52,140 +60,172 @@ export default function PriceComparePage() {
   const [selectedProductId, setSelectedProductId] = useState("");
   const [selectedQty, setSelectedQty] = useState(1);
 
-  // 인라인 편집 상태
-  const [editingCell, setEditingCell] = useState<{
-    productId: string;
-    field: "supply_price" | "vendor";
-    vendorName?: string;
-  } | null>(null);
-  const [editValue, setEditValue] = useState("");
-  const [saving, setSaving] = useState(false);
-  const editInputRef = useRef<HTMLInputElement>(null);
-
   // 벤더 ID 맵 (이름 → id)
   const [vendorIdMap, setVendorIdMap] = useState<Record<string, string>>({});
 
-  // 편집 시작
-  const startEditing = useCallback(
-    (productId: string, field: "supply_price" | "vendor", vendorName?: string, currentValue?: number | null) => {
-      setEditingCell({ productId, field, vendorName });
-      setEditValue(currentValue != null ? String(currentValue) : "");
-      setTimeout(() => editInputRef.current?.focus(), 50);
-    },
-    []
-  );
+  // 모달 상태
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<"create" | "edit">("edit");
+  const [editingProduct, setEditingProduct] = useState<ProductWithPrices | null>(null);
+  const [formData, setFormData] = useState<ProductFormData>({ name: "", spec: "", supply_price: "", vendorPrices: {} });
+  const [saving, setSaving] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ProductWithPrices | null>(null);
 
-  // 편집 취소
-  const cancelEditing = useCallback(() => {
-    setEditingCell(null);
-    setEditValue("");
+  // 모달 열기: 수정
+  const openEditModal = useCallback((product: ProductWithPrices) => {
+    setModalMode("edit");
+    setEditingProduct(product);
+    const vp: Record<string, string> = {};
+    const vendorList = product.category === "양방" ? YANGBANG_VENDORS : HANBANG_VENDORS;
+    vendorList.forEach((v) => {
+      vp[v] = product.vendors[v] != null ? String(product.vendors[v]) : "";
+    });
+    setFormData({
+      name: product.name,
+      spec: product.spec,
+      supply_price: product.supply_price != null ? String(product.supply_price) : "",
+      vendorPrices: vp,
+    });
+    setModalOpen(true);
   }, []);
 
-  // 납품가 저장
-  const saveSupplyPrice = useCallback(
-    async (productId: string, newPrice: number | null) => {
-      setSaving(true);
-      const { error } = await supabase
+  // 모달 열기: 신규
+  const openCreateModal = useCallback(() => {
+    setModalMode("create");
+    setEditingProduct(null);
+    const vp: Record<string, string> = {};
+    const vendorList = category === "양방" ? YANGBANG_VENDORS : HANBANG_VENDORS;
+    vendorList.forEach((v) => { vp[v] = ""; });
+    setFormData({ name: "", spec: "", supply_price: "", vendorPrices: vp });
+    setModalOpen(true);
+  }, [category]);
+
+  // 모달 닫기
+  const closeModal = useCallback(() => {
+    setModalOpen(false);
+    setEditingProduct(null);
+    setFormData({ name: "", spec: "", supply_price: "", vendorPrices: {} });
+  }, []);
+
+  // 저장 (생성 / 수정)
+  const handleSave = useCallback(async () => {
+    if (!formData.name.trim()) return;
+    setSaving(true);
+
+    const supplyPrice = formData.supply_price.trim() === "" ? null : parseInt(formData.supply_price.replace(/[,₩\s]/g, ""), 10);
+    const vendorList = category === "양방" ? YANGBANG_VENDORS : HANBANG_VENDORS;
+
+    if (modalMode === "create") {
+      // 새 제품 생성
+      const { data: newProduct, error } = await supabase
         .from("products")
-        .update({ supply_price: newPrice })
-        .eq("id", productId);
-      if (!error) {
-        setProducts((prev) =>
-          prev.map((p) => (p.id === productId ? { ...p, supply_price: newPrice } : p))
-        );
-      }
-      setSaving(false);
-      setEditingCell(null);
-      setEditValue("");
-    },
-    []
-  );
+        .insert({ name: formData.name.trim(), spec: formData.spec.trim(), category, supply_price: supplyPrice })
+        .select("id, name, spec, category, supply_price")
+        .single();
 
-  // 벤더 단가 저장
-  const saveVendorPrice = useCallback(
-    async (productId: string, vendorName: string, newPrice: number | null) => {
-      setSaving(true);
-      const vendorId = vendorIdMap[vendorName];
-      if (!vendorId) {
-        setSaving(false);
-        return;
+      if (error || !newProduct) { setSaving(false); return; }
+
+      // 벤더 단가 입력
+      for (const vendorName of vendorList) {
+        const priceStr = formData.vendorPrices[vendorName];
+        if (priceStr && priceStr.trim() !== "") {
+          const price = parseInt(priceStr.replace(/[,₩\s]/g, ""), 10);
+          if (!isNaN(price) && vendorIdMap[vendorName]) {
+            await supabase.from("vendor_products").insert({
+              product_id: newProduct.id,
+              vendor_id: vendorIdMap[vendorName],
+              unit_price: price,
+            });
+          }
+        }
       }
 
-      if (newPrice === null) {
-        // 가격 삭제
-        await supabase
-          .from("vendor_products")
-          .delete()
-          .eq("product_id", productId)
-          .eq("vendor_id", vendorId);
-      } else {
-        // upsert: 있으면 업데이트, 없으면 추가
+      // 로컬 상태에 추가
+      const vendorMap: Record<string, number | null> = {};
+      vendorList.forEach((v) => {
+        const p = formData.vendorPrices[v];
+        vendorMap[v] = p && p.trim() !== "" ? parseInt(p.replace(/[,₩\s]/g, ""), 10) || null : null;
+      });
+      const prices = Object.values(vendorMap).filter((v): v is number => v !== null);
+      const lowestPrice = prices.length > 0 ? Math.min(...prices) : null;
+      const lowestVendor = lowestPrice !== null ? Object.entries(vendorMap).find(([, v]) => v === lowestPrice)?.[0] ?? null : null;
+      let priceDiffPct: number | null = null;
+      if (prices.length >= 2) { priceDiffPct = Math.round(((Math.max(...prices) - Math.min(...prices)) / Math.min(...prices)) * 100); }
+
+      setProducts((prev) => [...prev, {
+        id: newProduct.id, name: newProduct.name, spec: newProduct.spec, category: newProduct.category,
+        supply_price: supplyPrice, vendors: vendorMap, lowest_price: lowestPrice, lowest_vendor: lowestVendor, price_diff_pct: priceDiffPct,
+      }]);
+
+    } else if (editingProduct) {
+      // 제품 정보 업데이트
+      await supabase.from("products").update({
+        name: formData.name.trim(),
+        spec: formData.spec.trim(),
+        supply_price: supplyPrice,
+      }).eq("id", editingProduct.id);
+
+      // 벤더 단가 업데이트
+      for (const vendorName of vendorList) {
+        const priceStr = formData.vendorPrices[vendorName];
+        const newPrice = priceStr && priceStr.trim() !== "" ? parseInt(priceStr.replace(/[,₩\s]/g, ""), 10) : null;
+        const vId = vendorIdMap[vendorName];
+        if (!vId) continue;
+
         const { data: existing } = await supabase
-          .from("vendor_products")
-          .select("id")
-          .eq("product_id", productId)
-          .eq("vendor_id", vendorId)
-          .maybeSingle();
+          .from("vendor_products").select("id").eq("product_id", editingProduct.id).eq("vendor_id", vId).maybeSingle();
 
-        if (existing) {
-          await supabase
-            .from("vendor_products")
-            .update({ unit_price: newPrice, last_updated: new Date().toISOString() })
-            .eq("id", existing.id);
-        } else {
-          await supabase
-            .from("vendor_products")
-            .insert({ product_id: productId, vendor_id: vendorId, unit_price: newPrice });
+        if (newPrice !== null && !isNaN(newPrice)) {
+          if (existing) {
+            await supabase.from("vendor_products").update({ unit_price: newPrice, last_updated: new Date().toISOString() }).eq("id", existing.id);
+          } else {
+            await supabase.from("vendor_products").insert({ product_id: editingProduct.id, vendor_id: vId, unit_price: newPrice });
+          }
+        } else if (existing) {
+          await supabase.from("vendor_products").delete().eq("id", existing.id);
         }
       }
 
       // 로컬 상태 업데이트
-      setProducts((prev) =>
-        prev.map((p) => {
-          if (p.id !== productId) return p;
-          const updatedVendors = { ...p.vendors, [vendorName]: newPrice };
-          const prices = Object.values(updatedVendors).filter((v): v is number => v !== null);
-          const lowestPrice = prices.length > 0 ? Math.min(...prices) : null;
-          const lowestVendor = lowestPrice !== null
-            ? Object.entries(updatedVendors).find(([, v]) => v === lowestPrice)?.[0] ?? null
-            : null;
-          let priceDiffPct: number | null = null;
-          if (prices.length >= 2) {
-            const max = Math.max(...prices);
-            const min = Math.min(...prices);
-            priceDiffPct = Math.round(((max - min) / min) * 100);
-          }
-          return { ...p, vendors: updatedVendors, lowest_price: lowestPrice, lowest_vendor: lowestVendor, price_diff_pct: priceDiffPct };
-        })
-      );
+      const vendorMap: Record<string, number | null> = {};
+      vendorList.forEach((v) => {
+        const p = formData.vendorPrices[v];
+        vendorMap[v] = p && p.trim() !== "" ? parseInt(p.replace(/[,₩\s]/g, ""), 10) || null : null;
+      });
+      const prices = Object.values(vendorMap).filter((v): v is number => v !== null);
+      const lowestPrice = prices.length > 0 ? Math.min(...prices) : null;
+      const lowestVendor = lowestPrice !== null ? Object.entries(vendorMap).find(([, v]) => v === lowestPrice)?.[0] ?? null : null;
+      let priceDiffPct: number | null = null;
+      if (prices.length >= 2) { priceDiffPct = Math.round(((Math.max(...prices) - Math.min(...prices)) / Math.min(...prices)) * 100); }
 
-      setSaving(false);
-      setEditingCell(null);
-      setEditValue("");
-    },
-    [vendorIdMap]
-  );
+      setProducts((prev) => prev.map((p) =>
+        p.id === editingProduct.id
+          ? { ...p, name: formData.name.trim(), spec: formData.spec.trim(), supply_price: supplyPrice, vendors: vendorMap, lowest_price: lowestPrice, lowest_vendor: lowestVendor, price_diff_pct: priceDiffPct }
+          : p
+      ));
+    }
 
-  // Enter/Esc 키 핸들링
-  const handleEditKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Escape") {
-        cancelEditing();
-        return;
-      }
-      if (e.key === "Enter" && editingCell) {
-        const parsed = editValue.trim() === "" ? null : parseInt(editValue.replace(/[,₩\s]/g, ""), 10);
-        if (editValue.trim() !== "" && (parsed === null || isNaN(parsed))) return;
-        const finalPrice = parsed !== null && !isNaN(parsed) ? parsed : null;
-        if (editingCell.field === "supply_price") {
-          saveSupplyPrice(editingCell.productId, finalPrice);
-        } else if (editingCell.vendorName) {
-          saveVendorPrice(editingCell.productId, editingCell.vendorName, finalPrice);
-        }
-      }
-    },
-    [editingCell, editValue, cancelEditing, saveSupplyPrice, saveVendorPrice]
-  );
+    setSaving(false);
+    closeModal();
+  }, [formData, modalMode, editingProduct, category, vendorIdMap, closeModal]);
+
+  // 삭제 확인
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteTarget) return;
+    setSaving(true);
+
+    // 벤더 단가 삭제
+    await supabase.from("vendor_products").delete().eq("product_id", deleteTarget.id);
+    // 제품 삭제
+    await supabase.from("products").delete().eq("id", deleteTarget.id);
+
+    setProducts((prev) => prev.filter((p) => p.id !== deleteTarget.id));
+    setSaving(false);
+    setDeleteConfirmOpen(false);
+    setDeleteTarget(null);
+    closeModal();
+  }, [deleteTarget, closeModal]);
 
   useEffect(() => {
     async function fetchData() {
@@ -575,6 +615,13 @@ export default function PriceComparePage() {
                 ({filteredProducts.length}개 품목)
               </span>
             </div>
+            <button
+              onClick={openCreateModal}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              신규 품목
+            </button>
           </div>
 
           {loading ? (
@@ -628,85 +675,42 @@ export default function PriceComparePage() {
                     return (
                       <tr
                         key={p.id}
-                        className="hover:bg-blue-50/30 transition-colors"
+                        className="hover:bg-blue-50/30 transition-colors cursor-pointer"
+                        onClick={() => openEditModal(p)}
                       >
-                        <td className="px-3 md:px-4 py-2 md:py-2.5 font-medium text-gray-900 sticky left-0 bg-white z-10 max-w-[200px] md:max-w-[280px] truncate">
-                          {p.name}
+                        <td className="px-3 md:px-4 py-2 md:py-2.5 font-medium text-gray-900 sticky left-0 bg-white z-10 max-w-[200px] md:max-w-[280px] truncate group-hover:bg-blue-50/30">
+                          <span className="flex items-center gap-1.5">
+                            {p.name}
+                            <Pencil className="w-3 h-3 text-gray-300 flex-shrink-0" />
+                          </span>
                         </td>
                         <td className="px-2 md:px-3 py-2 md:py-2.5 text-gray-500 whitespace-nowrap">
                           {p.spec}
                         </td>
-                        <td
-                          className="px-2 md:px-3 py-2 md:py-2.5 text-right text-gray-700 font-medium whitespace-nowrap cursor-pointer hover:bg-blue-50 group"
-                          onClick={() => {
-                            if (!editingCell || editingCell.productId !== p.id || editingCell.field !== "supply_price") {
-                              startEditing(p.id, "supply_price", undefined, p.supply_price);
-                            }
-                          }}
-                        >
-                          {editingCell?.productId === p.id && editingCell.field === "supply_price" ? (
-                            <input
-                              ref={editInputRef}
-                              type="text"
-                              value={editValue}
-                              onChange={(e) => setEditValue(e.target.value)}
-                              onKeyDown={handleEditKeyDown}
-                              onBlur={cancelEditing}
-                              className="w-24 px-1 py-0.5 text-right border border-blue-400 rounded text-sm outline-none focus:ring-1 focus:ring-blue-500"
-                              disabled={saving}
-                            />
-                          ) : (
-                            <span className="flex items-center justify-end gap-1">
-                              {formatPrice(p.supply_price)}
-                              <Pencil className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity" />
-                            </span>
-                          )}
+                        <td className="px-2 md:px-3 py-2 md:py-2.5 text-right text-gray-700 font-medium whitespace-nowrap">
+                          {formatPrice(p.supply_price)}
                         </td>
                         {currentVendors.map((v) => {
                           const price = p.vendors[v] ?? null;
                           const isLowest = price !== null && price === minPrice;
-                          const isEditing = editingCell?.productId === p.id && editingCell.field === "vendor" && editingCell.vendorName === v;
                           return (
                             <td
                               key={v}
-                              className={`px-2 md:px-3 py-2 md:py-2.5 text-right whitespace-nowrap cursor-pointer group ${
-                                isEditing
-                                  ? "bg-blue-50"
-                                  : isLowest
-                                  ? "text-emerald-700 font-bold bg-emerald-50/50 hover:bg-emerald-100/50"
+                              className={`px-2 md:px-3 py-2 md:py-2.5 text-right whitespace-nowrap ${
+                                isLowest
+                                  ? "text-emerald-700 font-bold bg-emerald-50/50"
                                   : price === null
-                                  ? "text-gray-300 hover:bg-gray-50"
-                                  : "text-gray-600 hover:bg-blue-50"
+                                  ? "text-gray-300"
+                                  : "text-gray-600"
                               }`}
-                              onClick={() => {
-                                if (!isEditing) {
-                                  startEditing(p.id, "vendor", v, price);
-                                }
-                              }}
                             >
-                              {isEditing ? (
-                                <input
-                                  ref={editInputRef}
-                                  type="text"
-                                  value={editValue}
-                                  onChange={(e) => setEditValue(e.target.value)}
-                                  onKeyDown={handleEditKeyDown}
-                                  onBlur={cancelEditing}
-                                  className="w-24 px-1 py-0.5 text-right border border-blue-400 rounded text-sm outline-none focus:ring-1 focus:ring-blue-500"
-                                  disabled={saving}
-                                  placeholder="가격 입력"
-                                />
-                              ) : price !== null ? (
-                                <span className="flex items-center justify-end gap-1">
+                              {price !== null ? (
+                                <span>
                                   {formatPrice(price)}
-                                  {isLowest && <span className="text-[10px]">✓</span>}
-                                  <Pencil className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                  {isLowest && <span className="text-[10px] ml-0.5">✓</span>}
                                 </span>
                               ) : (
-                                <span className="flex items-center justify-end gap-1">
-                                  -
-                                  <Plus className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                </span>
+                                "-"
                               )}
                             </td>
                           );
@@ -972,6 +976,160 @@ export default function PriceComparePage() {
           </div>
         </div>
       </div>
+
+      {/* 품목 편집/추가 모달 */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={closeModal}>
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h2 className="text-base font-bold text-gray-900">
+                {modalMode === "create" ? "신규 품목 추가" : "품목 정보 수정"}
+              </h2>
+              <button onClick={closeModal} className="p-1 hover:bg-gray-100 rounded-lg transition-colors">
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {/* 기본 정보 */}
+              <div className="space-y-3">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">기본 정보</p>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">품목명 *</label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="예: 알콜솜"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">규격</label>
+                  <input
+                    type="text"
+                    value={formData.spec}
+                    onChange={(e) => setFormData({ ...formData, spec: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="예: 100매/팩"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">납품가 (원)</label>
+                  <input
+                    type="text"
+                    value={formData.supply_price}
+                    onChange={(e) => setFormData({ ...formData, supply_price: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="병원에 납품하는 가격"
+                  />
+                </div>
+              </div>
+
+              {/* 벤더별 단가 */}
+              <div className="space-y-3">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">벤더별 매입 단가</p>
+                <div className="grid grid-cols-1 gap-2">
+                  {(category === "양방" ? YANGBANG_VENDORS : HANBANG_VENDORS).map((v) => (
+                    <div key={v} className="flex items-center gap-3">
+                      <label className="text-sm text-gray-700 w-28 flex-shrink-0 truncate">{v}</label>
+                      <input
+                        type="text"
+                        value={formData.vendorPrices[v] || ""}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          vendorPrices: { ...formData.vendorPrices, [v]: e.target.value },
+                        })}
+                        className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-sm text-right focus:ring-2 focus:ring-blue-500 outline-none"
+                        placeholder="-"
+                      />
+                      <span className="text-xs text-gray-400 w-4">원</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 하단 버튼 */}
+            <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl">
+              <div>
+                {modalMode === "edit" && editingProduct && (
+                  <button
+                    onClick={() => {
+                      setDeleteTarget(editingProduct);
+                      setDeleteConfirmOpen(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-red-600 hover:bg-red-50 rounded-lg text-sm transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    삭제
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={closeModal}
+                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !formData.name.trim()}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Save className="w-4 h-4" />
+                  {saving ? "저장 중..." : "저장"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 삭제 확인 다이얼로그 */}
+      {deleteConfirmOpen && deleteTarget && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setDeleteConfirmOpen(false)}>
+          <div
+            className="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <Trash2 className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-gray-900">품목 삭제</h3>
+                <p className="text-xs text-gray-500 mt-0.5">이 작업은 되돌릴 수 없습니다</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-700 mb-1">
+              <strong>{deleteTarget.name}</strong> ({deleteTarget.spec})
+            </p>
+            <p className="text-xs text-gray-500 mb-5">
+              이 품목과 연결된 모든 벤더 단가 정보도 함께 삭제됩니다.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setDeleteConfirmOpen(false)}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleDeleteConfirm}
+                disabled={saving}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:bg-gray-300 transition-colors"
+              >
+                {saving ? "삭제 중..." : "삭제"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
