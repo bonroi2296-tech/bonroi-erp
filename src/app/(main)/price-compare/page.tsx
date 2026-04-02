@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
-import { Search, ArrowUpDown, TrendingDown, AlertTriangle, X, Plus } from "lucide-react";
+import { Search, ArrowUpDown, TrendingDown, AlertTriangle, X, Plus, Pencil } from "lucide-react";
 
 interface VendorPrice {
   vendor_name: string;
@@ -52,6 +52,141 @@ export default function PriceComparePage() {
   const [selectedProductId, setSelectedProductId] = useState("");
   const [selectedQty, setSelectedQty] = useState(1);
 
+  // 인라인 편집 상태
+  const [editingCell, setEditingCell] = useState<{
+    productId: string;
+    field: "supply_price" | "vendor";
+    vendorName?: string;
+  } | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  // 벤더 ID 맵 (이름 → id)
+  const [vendorIdMap, setVendorIdMap] = useState<Record<string, string>>({});
+
+  // 편집 시작
+  const startEditing = useCallback(
+    (productId: string, field: "supply_price" | "vendor", vendorName?: string, currentValue?: number | null) => {
+      setEditingCell({ productId, field, vendorName });
+      setEditValue(currentValue != null ? String(currentValue) : "");
+      setTimeout(() => editInputRef.current?.focus(), 50);
+    },
+    []
+  );
+
+  // 편집 취소
+  const cancelEditing = useCallback(() => {
+    setEditingCell(null);
+    setEditValue("");
+  }, []);
+
+  // 납품가 저장
+  const saveSupplyPrice = useCallback(
+    async (productId: string, newPrice: number | null) => {
+      setSaving(true);
+      const { error } = await supabase
+        .from("products")
+        .update({ supply_price: newPrice })
+        .eq("id", productId);
+      if (!error) {
+        setProducts((prev) =>
+          prev.map((p) => (p.id === productId ? { ...p, supply_price: newPrice } : p))
+        );
+      }
+      setSaving(false);
+      setEditingCell(null);
+      setEditValue("");
+    },
+    []
+  );
+
+  // 벤더 단가 저장
+  const saveVendorPrice = useCallback(
+    async (productId: string, vendorName: string, newPrice: number | null) => {
+      setSaving(true);
+      const vendorId = vendorIdMap[vendorName];
+      if (!vendorId) {
+        setSaving(false);
+        return;
+      }
+
+      if (newPrice === null) {
+        // 가격 삭제
+        await supabase
+          .from("vendor_products")
+          .delete()
+          .eq("product_id", productId)
+          .eq("vendor_id", vendorId);
+      } else {
+        // upsert: 있으면 업데이트, 없으면 추가
+        const { data: existing } = await supabase
+          .from("vendor_products")
+          .select("id")
+          .eq("product_id", productId)
+          .eq("vendor_id", vendorId)
+          .maybeSingle();
+
+        if (existing) {
+          await supabase
+            .from("vendor_products")
+            .update({ unit_price: newPrice, last_updated: new Date().toISOString() })
+            .eq("id", existing.id);
+        } else {
+          await supabase
+            .from("vendor_products")
+            .insert({ product_id: productId, vendor_id: vendorId, unit_price: newPrice });
+        }
+      }
+
+      // 로컬 상태 업데이트
+      setProducts((prev) =>
+        prev.map((p) => {
+          if (p.id !== productId) return p;
+          const updatedVendors = { ...p.vendors, [vendorName]: newPrice };
+          const prices = Object.values(updatedVendors).filter((v): v is number => v !== null);
+          const lowestPrice = prices.length > 0 ? Math.min(...prices) : null;
+          const lowestVendor = lowestPrice !== null
+            ? Object.entries(updatedVendors).find(([, v]) => v === lowestPrice)?.[0] ?? null
+            : null;
+          let priceDiffPct: number | null = null;
+          if (prices.length >= 2) {
+            const max = Math.max(...prices);
+            const min = Math.min(...prices);
+            priceDiffPct = Math.round(((max - min) / min) * 100);
+          }
+          return { ...p, vendors: updatedVendors, lowest_price: lowestPrice, lowest_vendor: lowestVendor, price_diff_pct: priceDiffPct };
+        })
+      );
+
+      setSaving(false);
+      setEditingCell(null);
+      setEditValue("");
+    },
+    [vendorIdMap]
+  );
+
+  // Enter/Esc 키 핸들링
+  const handleEditKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        cancelEditing();
+        return;
+      }
+      if (e.key === "Enter" && editingCell) {
+        const parsed = editValue.trim() === "" ? null : parseInt(editValue.replace(/[,₩\s]/g, ""), 10);
+        if (editValue.trim() !== "" && (parsed === null || isNaN(parsed))) return;
+        const finalPrice = parsed !== null && !isNaN(parsed) ? parsed : null;
+        if (editingCell.field === "supply_price") {
+          saveSupplyPrice(editingCell.productId, finalPrice);
+        } else if (editingCell.vendorName) {
+          saveVendorPrice(editingCell.productId, editingCell.vendorName, finalPrice);
+        }
+      }
+    },
+    [editingCell, editValue, cancelEditing, saveSupplyPrice, saveVendorPrice]
+  );
+
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
@@ -94,6 +229,11 @@ export default function PriceComparePage() {
 
       if (vendorsData) {
         setVendorShippingInfo(vendorsData);
+        const idMap: Record<string, string> = {};
+        vendorsData.forEach((v: { id: string; name: string }) => {
+          idMap[v.name] = v.id;
+        });
+        setVendorIdMap(idMap);
       }
 
       const vendorList = category === "양방" ? YANGBANG_VENDORS : HANBANG_VENDORS;
@@ -496,32 +636,77 @@ export default function PriceComparePage() {
                         <td className="px-2 md:px-3 py-2 md:py-2.5 text-gray-500 whitespace-nowrap">
                           {p.spec}
                         </td>
-                        <td className="px-2 md:px-3 py-2 md:py-2.5 text-right text-gray-700 font-medium whitespace-nowrap">
-                          {formatPrice(p.supply_price)}
+                        <td
+                          className="px-2 md:px-3 py-2 md:py-2.5 text-right text-gray-700 font-medium whitespace-nowrap cursor-pointer hover:bg-blue-50 group"
+                          onClick={() => {
+                            if (!editingCell || editingCell.productId !== p.id || editingCell.field !== "supply_price") {
+                              startEditing(p.id, "supply_price", undefined, p.supply_price);
+                            }
+                          }}
+                        >
+                          {editingCell?.productId === p.id && editingCell.field === "supply_price" ? (
+                            <input
+                              ref={editInputRef}
+                              type="text"
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              onKeyDown={handleEditKeyDown}
+                              onBlur={cancelEditing}
+                              className="w-24 px-1 py-0.5 text-right border border-blue-400 rounded text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                              disabled={saving}
+                            />
+                          ) : (
+                            <span className="flex items-center justify-end gap-1">
+                              {formatPrice(p.supply_price)}
+                              <Pencil className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </span>
+                          )}
                         </td>
                         {currentVendors.map((v) => {
                           const price = p.vendors[v] ?? null;
                           const isLowest = price !== null && price === minPrice;
+                          const isEditing = editingCell?.productId === p.id && editingCell.field === "vendor" && editingCell.vendorName === v;
                           return (
                             <td
                               key={v}
-                              className={`px-2 md:px-3 py-2 md:py-2.5 text-right whitespace-nowrap ${
-                                isLowest
-                                  ? "text-emerald-700 font-bold bg-emerald-50/50"
+                              className={`px-2 md:px-3 py-2 md:py-2.5 text-right whitespace-nowrap cursor-pointer group ${
+                                isEditing
+                                  ? "bg-blue-50"
+                                  : isLowest
+                                  ? "text-emerald-700 font-bold bg-emerald-50/50 hover:bg-emerald-100/50"
                                   : price === null
-                                  ? "text-gray-300"
-                                  : "text-gray-600"
+                                  ? "text-gray-300 hover:bg-gray-50"
+                                  : "text-gray-600 hover:bg-blue-50"
                               }`}
+                              onClick={() => {
+                                if (!isEditing) {
+                                  startEditing(p.id, "vendor", v, price);
+                                }
+                              }}
                             >
-                              {price !== null ? (
-                                <>
+                              {isEditing ? (
+                                <input
+                                  ref={editInputRef}
+                                  type="text"
+                                  value={editValue}
+                                  onChange={(e) => setEditValue(e.target.value)}
+                                  onKeyDown={handleEditKeyDown}
+                                  onBlur={cancelEditing}
+                                  className="w-24 px-1 py-0.5 text-right border border-blue-400 rounded text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                                  disabled={saving}
+                                  placeholder="가격 입력"
+                                />
+                              ) : price !== null ? (
+                                <span className="flex items-center justify-end gap-1">
                                   {formatPrice(price)}
-                                  {isLowest && (
-                                    <span className="ml-1 text-[10px]">✓</span>
-                                  )}
-                                </>
+                                  {isLowest && <span className="text-[10px]">✓</span>}
+                                  <Pencil className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </span>
                               ) : (
-                                "-"
+                                <span className="flex items-center justify-end gap-1">
+                                  -
+                                  <Plus className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </span>
                               )}
                             </td>
                           );
