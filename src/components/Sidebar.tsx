@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Package, ShoppingCart, Truck, Send,
-  FileText, BarChart3, Settings, X, TrendingDown, RotateCcw, ClipboardList
+  FileText, BarChart3, Settings, X, TrendingDown, RotateCcw, ClipboardList, ShieldAlert
 } from "lucide-react";
 
 const navItems = [
@@ -14,6 +14,7 @@ const navItems = [
   { href: "/products", icon: Package, label: "품목 마스터" },
   { href: "/price-compare", icon: TrendingDown, label: "단가 비교" },
   { href: "/vendors", icon: Truck, label: "벤더 관리" },
+  { href: "/supply-monitor", icon: ShieldAlert, label: "공급망 관리" },
   { href: "/purchase", icon: Send, label: "발주 관리" },
   { href: "/returns", icon: RotateCcw, label: "반품 관리" },
   { href: "/documents", icon: FileText, label: "문서 생성" },
