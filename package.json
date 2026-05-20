@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.101.0",
     "exceljs": "^4.4.0",
     "lucide-react": "^1.7.0",

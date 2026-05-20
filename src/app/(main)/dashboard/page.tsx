@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
+import { formatCurrency } from "@/lib/format";
 import { Package, ShoppingCart, Truck, TrendingUp, ArrowUpRight, Send } from "lucide-react";
 
 interface DashboardStats {
@@ -43,6 +44,17 @@ interface BranchMonthStats {
   margin: number;
 }
 
+interface DashboardStatsRpc {
+  product_count: number;
+  vendor_count: number;
+  purchase_order_count: number;
+  order_count: number;
+  total_margin: number;
+  this_month: { purchase: number; supply: number; margin: number };
+  last_month: { purchase: number; supply: number; margin: number };
+  branches: Array<{ branch_id: string; branch_name: string; purchase: number; supply: number; margin: number }>;
+}
+
 const statusColors: Record<string, string> = {
   "발주완료": "bg-green-100 text-green-700",
   "처리중": "bg-blue-100 text-blue-700",
@@ -60,6 +72,37 @@ export default function DashboardPage() {
   useEffect(() => {
     async function fetchData() {
       try {
+        // 빠른 경로: DB에서 집계한 결과를 RPC로 받음 (마이그레이션 0003 적용 시)
+        const { data: rpcData, error: rpcError } = await supabase.rpc("get_dashboard_stats");
+        if (!rpcError && rpcData) {
+          const d = rpcData as unknown as DashboardStatsRpc;
+          setStats({
+            productCount: d.product_count,
+            orderCount: d.order_count,
+            purchaseOrderCount: d.purchase_order_count,
+            vendorCount: d.vendor_count,
+            totalMargin: d.total_margin,
+          });
+          setMonthComparison({ thisMonth: d.this_month, lastMonth: d.last_month });
+          setBranchMonthStats(
+            (d.branches || []).map((b) => ({
+              branchId: b.branch_id,
+              branchName: b.branch_name,
+              purchase: b.purchase,
+              supply: b.supply,
+              margin: b.margin,
+            }))
+          );
+          const { data: recent } = await supabase
+            .from("orders")
+            .select("id, order_number, order_date, status, total_supply_amount, branch:branches(name)")
+            .order("order_date", { ascending: false })
+            .limit(8);
+          setRecentOrders((recent as unknown as RecentOrder[]) || []);
+          return;
+        }
+
+        // 폴백: RPC 미적용 환경 — 기존 클라이언트 집계
         const [productsRes, ordersRes, vendorsRes, recentRes, branchesRes] = await Promise.all([
           supabase.from("products").select("id", { count: "exact", head: true }),
           supabase.from("orders").select("id, total_margin, order_date, branch_id, total_purchase_amount, total_supply_amount", { count: "exact" }),
@@ -152,7 +195,7 @@ export default function DashboardPage() {
     { label: "주문 건수", value: stats.orderCount.toLocaleString(), icon: ShoppingCart, color: "bg-emerald-500", change: null },
     { label: "발주 건수", value: stats.purchaseOrderCount.toLocaleString(), icon: Send, color: "bg-indigo-500", change: null },
     { label: "거래 벤더", value: stats.vendorCount.toLocaleString(), icon: Truck, color: "bg-purple-500", change: null },
-    { label: "총 마진", value: `₩${stats.totalMargin.toLocaleString()}`, icon: TrendingUp, color: "bg-amber-500", change: null },
+    { label: "총 마진", value: formatCurrency(stats.totalMargin), icon: TrendingUp, color: "bg-amber-500", change: null },
   ];
 
   if (loading) {
@@ -218,7 +261,7 @@ export default function DashboardPage() {
                         {order.status}
                       </span>
                     </td>
-                    <td className="px-4 md:px-5 py-2.5 md:py-3 text-right text-gray-900">₩{(order.total_supply_amount || 0).toLocaleString()}</td>
+                    <td className="px-4 md:px-5 py-2.5 md:py-3 text-right text-gray-900">{formatCurrency(order.total_supply_amount)}</td>
                   </tr>
                 ))}
                 {recentOrders.length === 0 && (
@@ -240,7 +283,7 @@ export default function DashboardPage() {
               <p className="text-xs md:text-sm text-gray-500 mb-2">구매금액</p>
               <div className="flex items-end gap-2 mb-2">
                 <div>
-                  <p className="text-lg md:text-2xl font-bold text-gray-900">₩{monthComparison.thisMonth.purchase.toLocaleString()}</p>
+                  <p className="text-lg md:text-2xl font-bold text-gray-900">{formatCurrency(monthComparison.thisMonth.purchase)}</p>
                   <p className="text-xs text-gray-500 mt-1">이번 달</p>
                 </div>
                 <div className="flex-1 text-right">
@@ -253,7 +296,7 @@ export default function DashboardPage() {
                   ) : null}
                 </div>
               </div>
-              <p className="text-xs text-gray-500">지난 달: ₩{monthComparison.lastMonth.purchase.toLocaleString()}</p>
+              <p className="text-xs text-gray-500">지난 달: {formatCurrency(monthComparison.lastMonth.purchase)}</p>
             </div>
 
             {/* 공급가 */}
@@ -261,7 +304,7 @@ export default function DashboardPage() {
               <p className="text-xs md:text-sm text-gray-500 mb-2">공급가</p>
               <div className="flex items-end gap-2 mb-2">
                 <div>
-                  <p className="text-lg md:text-2xl font-bold text-gray-900">₩{monthComparison.thisMonth.supply.toLocaleString()}</p>
+                  <p className="text-lg md:text-2xl font-bold text-gray-900">{formatCurrency(monthComparison.thisMonth.supply)}</p>
                   <p className="text-xs text-gray-500 mt-1">이번 달</p>
                 </div>
                 <div className="flex-1 text-right">
@@ -274,7 +317,7 @@ export default function DashboardPage() {
                   ) : null}
                 </div>
               </div>
-              <p className="text-xs text-gray-500">지난 달: ₩{monthComparison.lastMonth.supply.toLocaleString()}</p>
+              <p className="text-xs text-gray-500">지난 달: {formatCurrency(monthComparison.lastMonth.supply)}</p>
             </div>
 
             {/* 마진 */}
@@ -282,7 +325,7 @@ export default function DashboardPage() {
               <p className="text-xs md:text-sm text-gray-500 mb-2">마진</p>
               <div className="flex items-end gap-2 mb-2">
                 <div>
-                  <p className="text-lg md:text-2xl font-bold text-emerald-600">₩{monthComparison.thisMonth.margin.toLocaleString()}</p>
+                  <p className="text-lg md:text-2xl font-bold text-emerald-600">{formatCurrency(monthComparison.thisMonth.margin)}</p>
                   <p className="text-xs text-gray-500 mt-1">이번 달</p>
                 </div>
                 <div className="flex-1 text-right">
@@ -295,7 +338,7 @@ export default function DashboardPage() {
                   ) : null}
                 </div>
               </div>
-              <p className="text-xs text-gray-500">지난 달: ₩{monthComparison.lastMonth.margin.toLocaleString()}</p>
+              <p className="text-xs text-gray-500">지난 달: {formatCurrency(monthComparison.lastMonth.margin)}</p>
             </div>
           </div>
         </div>
@@ -310,7 +353,7 @@ export default function DashboardPage() {
                 <div key={branch.branchId}>
                   <div className="flex justify-between items-center mb-2">
                     <span className="text-sm font-medium text-gray-900">{branch.branchName}</span>
-                    <span className="text-sm font-semibold text-gray-900">₩{branch.purchase.toLocaleString()}</span>
+                    <span className="text-sm font-semibold text-gray-900">{formatCurrency(branch.purchase)}</span>
                   </div>
                   <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
                     <div
@@ -319,8 +362,8 @@ export default function DashboardPage() {
                     />
                   </div>
                   <div className="flex gap-4 mt-1.5 text-xs text-gray-500">
-                    <span>공급: ₩{branch.supply.toLocaleString()}</span>
-                    <span>마진: ₩{branch.margin.toLocaleString()}</span>
+                    <span>공급: {formatCurrency(branch.supply)}</span>
+                    <span>마진: {formatCurrency(branch.margin)}</span>
                   </div>
                 </div>
               );

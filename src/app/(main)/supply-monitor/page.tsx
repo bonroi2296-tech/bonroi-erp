@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
+import type { TablesUpdate } from "@/lib/database.types";
 import {
   Package, TrendingUp, TrendingDown, AlertTriangle, Clock, CheckCircle2,
   Truck, XCircle, ChevronRight, Search, X, Save, RefreshCw
@@ -218,7 +219,7 @@ function FulfillmentTab() {
 
   const updateItemStatus = useCallback(async (itemId: string, field: string, value: string | number | null) => {
     setSaving(true);
-    await supabase.from("order_items").update({ [field]: value }).eq("id", itemId);
+    await supabase.from("order_items").update({ [field]: value } as TablesUpdate<"order_items">).eq("id", itemId);
     setDetailItems((prev) =>
       prev.map((i) => i.id === itemId ? { ...i, [field]: value } : i)
     );
@@ -480,8 +481,8 @@ function PriceMonitorTab() {
       }
 
       // 제품명, 벤더명 조회
-      const productIds = Array.from(new Set(data.map((d) => d.product_id).filter(Boolean)));
-      const vendorIds = Array.from(new Set(data.map((d) => d.vendor_id).filter(Boolean)));
+      const productIds = Array.from(new Set(data.map((d) => d.product_id).filter((x): x is string => Boolean(x))));
+      const vendorIds = Array.from(new Set(data.map((d) => d.vendor_id).filter((x): x is string => Boolean(x))));
 
       const [prodRes, vendRes] = await Promise.all([
         productIds.length > 0 ? supabase.from("products").select("id, name").in("id", productIds) : { data: [] },
@@ -496,7 +497,7 @@ function PriceMonitorTab() {
       setChanges(
         data.map((d) => ({
           ...d,
-          product_name: prodMap[d.product_id] || "알 수 없음",
+          product_name: (d.product_id ? prodMap[d.product_id] : "") || "알 수 없음",
           vendor_name: d.vendor_id ? vendMap[d.vendor_id] || "" : "",
         })) as PriceChange[]
       );
@@ -644,7 +645,7 @@ function SupplyRiskTab() {
 
   // 벤더/제품 목록
   const [vendors, setVendors] = useState<{ id: string; name: string }[]>([]);
-  const [products, setProducts] = useState<{ id: string; name: string; spec: string }[]>([]);
+  const [products, setProducts] = useState<{ id: string; name: string; spec: string | null }[]>([]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -663,7 +664,7 @@ function SupplyRiskTab() {
       const vMap: Record<string, string> = {};
       const pMap: Record<string, { name: string; spec: string }> = {};
       vendorRes.data.forEach((v) => { vMap[v.id] = v.name; });
-      productRes.data.forEach((p) => { pMap[p.id] = { name: p.name, spec: p.spec }; });
+      productRes.data.forEach((p) => { pMap[p.id] = { name: p.name, spec: p.spec ?? "" }; });
 
       setStatuses(
         supplyRes.data.map((s) => ({

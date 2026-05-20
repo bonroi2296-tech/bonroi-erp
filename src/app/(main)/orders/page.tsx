@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, Fragment } from "react";
 import TopBar from "@/components/TopBar";
+import { useToast } from "@/components/Toast";
 import { supabase } from "@/lib/supabase";
+import { formatCurrency } from "@/lib/format";
 import { Plus, Search, ChevronDown, ChevronRight, X, Trash2, ChevronUp } from "lucide-react";
 
 interface OrderRow {
@@ -94,6 +96,7 @@ const statusColors: Record<string, string> = {
 const statusOptions = ["대기", "처리중", "발주완료", "완료", "확인필요"];
 
 export default function OrdersPage() {
+  const toast = useToast();
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -237,7 +240,7 @@ export default function OrdersPage() {
       );
     } catch (err) {
       console.error("Status update error:", err);
-      alert("상태 업데이트 중 오류가 발생했습니다.");
+      toast.error("상태 업데이트 중 오류가 발생했습니다.");
     }
   };
 
@@ -262,7 +265,7 @@ export default function OrdersPage() {
       setExpandedOrderId(orderId);
     } catch (err) {
       console.error("Order items fetch error:", err);
-      alert("품목 조회 중 오류가 발생했습니다.");
+      toast.error("품목 조회 중 오류가 발생했습니다.");
     } finally {
       setLoadingOrderItems((prev) => {
         const next = new Set(prev);
@@ -353,23 +356,31 @@ export default function OrdersPage() {
         vendorGroups.get(item.vendor_id)!.push(item);
       }
 
-      // 현재 최대 주문번호 조회
-      const { data: maxOrder } = await supabase
-        .from("orders")
-        .select("order_number")
-        .order("order_number", { ascending: false })
-        .limit(1);
-      let lastNum = 0;
-      if (maxOrder?.[0]) {
-        const match = maxOrder[0].order_number.match(/ORD-\d{4}-(\d+)/);
-        if (match) lastNum = parseInt(match[1]);
-      }
-
+      // 주문번호 발급: DB 시퀀스(next_order_number RPC) 우선,
+      // 마이그레이션 미적용 환경에서는 클라이언트 증분으로 폴백
       const year = new Date().getFullYear();
+      let fallbackNum: number | null = null;
+      const getOrderNumber = async (): Promise<string> => {
+        const { data, error } = await supabase.rpc("next_order_number");
+        if (!error && typeof data === "string") return data;
+        if (fallbackNum === null) {
+          const { data: maxOrder } = await supabase
+            .from("orders")
+            .select("order_number")
+            .order("order_number", { ascending: false })
+            .limit(1);
+          fallbackNum = 0;
+          if (maxOrder?.[0]?.order_number) {
+            const match = maxOrder[0].order_number.match(/ORD-\d{4}-(\d+)/);
+            if (match) fallbackNum = parseInt(match[1]);
+          }
+        }
+        fallbackNum++;
+        return `ORD-${year}-${String(fallbackNum).padStart(4, "0")}`;
+      };
 
       for (const [vendorId, items] of Array.from(vendorGroups.entries())) {
-        lastNum++;
-        const orderNumber = `ORD-${year}-${String(lastNum).padStart(4, "0")}`;
+        const orderNumber = await getOrderNumber();
         const vendor = vendors.find((v) => v.id === vendorId);
         const product = products.find((p) => p.id === items[0].product_id);
         const category = product?.category || "양방";
@@ -395,7 +406,7 @@ export default function OrdersPage() {
           .select("id")
           .single();
 
-        if (orderError) throw orderError;
+        if (orderError || !orderData) throw orderError ?? new Error("주문 생성 실패");
 
         const orderItems = items.map((item) => ({
           order_id: orderData.id,
@@ -418,7 +429,7 @@ export default function OrdersPage() {
       await fetchOrders();
     } catch (err) {
       console.error("Order creation error:", err);
-      alert("주문 등록 중 오류가 발생했습니다.");
+      toast.error("주문 등록 중 오류가 발생했습니다.");
     } finally {
       setSubmitting(false);
     }
@@ -455,7 +466,7 @@ export default function OrdersPage() {
           <div className="bg-white rounded-xl border border-gray-200 p-3 md:p-4 text-center">
             <p className="text-xs text-gray-500">총 매입</p>
             <p className="text-lg md:text-xl font-bold text-gray-900">
-              ₩{groupedOrders.reduce((s, g) => s + g.total_purchase, 0).toLocaleString()}
+              {formatCurrency(groupedOrders.reduce((s, g) => s + g.total_purchase, 0))}
             </p>
           </div>
         </div>
@@ -520,19 +531,19 @@ export default function OrdersPage() {
                         <div className="hidden sm:block">
                           <p className="text-[10px] text-gray-400">매입</p>
                           <p className="text-xs md:text-sm text-gray-600">
-                            ₩{group.total_purchase.toLocaleString()}
+                            {formatCurrency(group.total_purchase)}
                           </p>
                         </div>
                         <div className="hidden sm:block">
                           <p className="text-[10px] text-gray-400">공급</p>
                           <p className="text-xs md:text-sm text-gray-900 font-medium">
-                            ₩{group.total_supply.toLocaleString()}
+                            {formatCurrency(group.total_supply)}
                           </p>
                         </div>
                         <div>
                           <p className="text-[10px] text-gray-400">마진</p>
                           <p className={`text-xs md:text-sm font-medium ${group.total_margin >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                            ₩{group.total_margin.toLocaleString()}
+                            {formatCurrency(group.total_margin)}
                           </p>
                         </div>
                       </div>
@@ -556,13 +567,12 @@ export default function OrdersPage() {
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                               {group.vendor_orders.map((vo) => {
-                                const isExpanded = expandedOrderId === vo.id;
+                                const orderExpanded = expandedOrderId === vo.id;
                                 const items = orderItems[vo.id] || [];
                                 const isLoading = loadingOrderItems.has(vo.id);
                                 return (
-                                  <>
+                                  <Fragment key={vo.id}>
                                     <tr
-                                      key={vo.id}
                                       onClick={() => fetchOrderItems(vo.id)}
                                       className="hover:bg-white transition-colors cursor-pointer"
                                     >
@@ -591,20 +601,20 @@ export default function OrdersPage() {
                                         </select>
                                       </td>
                                       <td className="px-3 py-2 text-right text-gray-600">
-                                        ₩{(vo.total_purchase_amount || 0).toLocaleString()}
+                                        {formatCurrency(vo.total_purchase_amount)}
                                       </td>
                                       <td className="px-3 py-2 text-right text-gray-900">
-                                        ₩{(vo.total_supply_amount || 0).toLocaleString()}
+                                        {formatCurrency(vo.total_supply_amount)}
                                       </td>
                                       <td className="px-4 md:px-5 py-2 text-right font-medium text-emerald-600">
-                                        {isExpanded ? (
+                                        {orderExpanded ? (
                                           <ChevronUp className="w-4 h-4 inline" />
                                         ) : (
-                                          <span>₩{(vo.total_margin || 0).toLocaleString()}</span>
+                                          <span>{formatCurrency(vo.total_margin)}</span>
                                         )}
                                       </td>
                                     </tr>
-                                    {isExpanded && (
+                                    {orderExpanded && (
                                       <tr key={`items-${vo.id}`} className="bg-gray-50">
                                         <td colSpan={7} className="px-4 md:px-5 py-4">
                                           {isLoading ? (
@@ -661,13 +671,13 @@ export default function OrdersPage() {
                                                             {item.quantity}
                                                           </td>
                                                           <td className="px-3 py-2 text-right text-gray-600">
-                                                            ₩{item.purchase_price.toLocaleString()}
+                                                            {formatCurrency(item.purchase_price)}
                                                           </td>
                                                           <td className="px-3 py-2 text-right text-gray-900">
-                                                            ₩{item.supply_price.toLocaleString()}
+                                                            {formatCurrency(item.supply_price)}
                                                           </td>
                                                           <td className="px-3 py-2 text-right font-medium text-emerald-600">
-                                                            ₩{itemMarginPerUnit.toLocaleString()}
+                                                            {formatCurrency(itemMarginPerUnit)}
                                                           </td>
                                                         </tr>
                                                       );
@@ -680,7 +690,7 @@ export default function OrdersPage() {
                                         </td>
                                       </tr>
                                     )}
-                                  </>
+                                  </Fragment>
                                 );
                               })}
                             </tbody>
@@ -900,10 +910,10 @@ export default function OrdersPage() {
                             <td className="px-3 py-2 text-gray-500">{item.vendor_name}</td>
                             <td className="px-3 py-2 text-right">{item.quantity}</td>
                             <td className="px-3 py-2 text-right">
-                              ₩{(item.purchase_price * item.quantity).toLocaleString()}
+                              {formatCurrency(item.purchase_price * item.quantity)}
                             </td>
                             <td className="px-3 py-2 text-right">
-                              ₩{(item.supply_price * item.quantity).toLocaleString()}
+                              {formatCurrency(item.supply_price * item.quantity)}
                             </td>
                             <td className="px-2 py-2">
                               <button onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-600">
@@ -917,13 +927,13 @@ export default function OrdersPage() {
                   </div>
                   <div className="flex justify-end gap-4 text-sm">
                     <span className="text-gray-500">
-                      매입 합계: <strong className="text-gray-900">₩{itemsTotal.purchase.toLocaleString()}</strong>
+                      매입 합계: <strong className="text-gray-900">{formatCurrency(itemsTotal.purchase)}</strong>
                     </span>
                     <span className="text-gray-500">
-                      공급 합계: <strong className="text-gray-900">₩{itemsTotal.supply.toLocaleString()}</strong>
+                      공급 합계: <strong className="text-gray-900">{formatCurrency(itemsTotal.supply)}</strong>
                     </span>
                     <span className="text-gray-500">
-                      마진: <strong className="text-emerald-600">₩{(itemsTotal.supply - itemsTotal.purchase).toLocaleString()}</strong>
+                      마진: <strong className="text-emerald-600">{formatCurrency(itemsTotal.supply - itemsTotal.purchase)}</strong>
                     </span>
                   </div>
                 </div>
