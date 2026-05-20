@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
-import { Search, X, Plus, Trash2, TrendingDown } from "lucide-react";
+import { formatCurrency } from "@/lib/format";
+import { Search, X, Plus, Trash2, TrendingDown, ChevronLeft, ChevronRight } from "lucide-react";
+
+const PAGE_SIZE = 50;
 
 interface Product {
   id: string;
@@ -34,32 +37,59 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState<string>("전체");
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [debouncedSearch, setDebouncedSearch] = useState<string>("");
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [page, setPage] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+
+  // 검색어 디바운스
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  // 필터/검색 변경 시 첫 페이지로
+  useEffect(() => {
+    setPage(0);
+  }, [categoryFilter, debouncedSearch]);
 
   useEffect(() => {
+    let cancelled = false;
+    async function fetchProducts() {
+      setLoading(true);
+      let query = supabase
+        .from("products")
+        .select(
+          "id, name, spec, category, supply_price, vendor_products(unit_price, is_lowest, vendor:vendors(name))",
+          { count: "exact" }
+        );
+
+      if (categoryFilter !== "전체") query = query.eq("category", categoryFilter);
+      if (debouncedSearch) {
+        const term = debouncedSearch.replace(/[%,]/g, "");
+        query = query.or(`name.ilike.%${term}%,spec.ilike.%${term}%`);
+      }
+
+      const { data, count } = await query
+        .order("name")
+        .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+
+      if (cancelled) return;
+      setProducts((data as unknown as Product[]) || []);
+      setTotalCount(count || 0);
+      setLoading(false);
+    }
     fetchProducts();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [page, categoryFilter, debouncedSearch]);
 
-  async function fetchProducts() {
-    const { data } = await supabase
-      .from("products")
-      .select("id, name, spec, category, supply_price, vendor_products(unit_price, is_lowest, vendor:vendors(name))")
-      .order("name");
-    setProducts((data as unknown as Product[]) || []);
-    setLoading(false);
-  }
-
-  const filtered = products.filter(p => {
-    const matchesCategory = categoryFilter === "전체" || p.category === categoryFilter;
-    const matchesSearch = searchTerm === "" ||
-      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.spec.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesCategory && matchesSearch;
-  });
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   return (
     <>
-      <TopBar title="품목 마스터" subtitle={`총 ${products.length}개 품목 등록`} />
+      <TopBar title="품목 마스터" subtitle={`총 ${totalCount.toLocaleString()}개 품목 등록`} />
       <div className="flex-1 p-4 md:p-6 space-y-4 overflow-auto">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
           <div className="relative w-full sm:w-auto">
@@ -106,7 +136,14 @@ export default function ProductsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filtered.map((product) => {
+                  {products.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-5 py-12 text-center text-gray-400">
+                        조건에 맞는 품목이 없습니다
+                      </td>
+                    </tr>
+                  )}
+                  {products.map((product) => {
                     const lowest = product.vendor_products?.find(vp => vp.is_lowest);
                     const lowestPrice = lowest?.unit_price || Math.min(...(product.vendor_products?.map(vp => vp.unit_price) || [0]));
                     const lowestVendor = lowest ? (lowest.vendor as unknown as { name: string })?.name : (product.vendor_products?.[0]?.vendor as unknown as { name: string })?.name || "-";
@@ -123,9 +160,9 @@ export default function ProductsPage() {
                             product.category === "양방" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"
                           }`}>{product.category}</span>
                         </td>
-                        <td className="px-4 md:px-5 py-2.5 md:py-3 text-right text-gray-900">₩{(product.supply_price || 0).toLocaleString()}</td>
+                        <td className="px-4 md:px-5 py-2.5 md:py-3 text-right text-gray-900">{formatCurrency(product.supply_price)}</td>
                         <td className="px-4 md:px-5 py-2.5 md:py-3 text-gray-600">{lowestVendor}</td>
-                        <td className="px-4 md:px-5 py-2.5 md:py-3 text-right text-emerald-600 font-medium">₩{lowestPrice.toLocaleString()}</td>
+                        <td className="px-4 md:px-5 py-2.5 md:py-3 text-right text-emerald-600 font-medium">{formatCurrency(lowestPrice)}</td>
                         <td className="px-4 md:px-5 py-2.5 md:py-3 text-center text-gray-500">{product.vendor_products?.length || 0}</td>
                       </tr>
                     );
@@ -135,6 +172,34 @@ export default function ProductsPage() {
             </div>
           )}
         </div>
+
+        {/* 페이지네이션 */}
+        {totalCount > PAGE_SIZE && (
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-500">
+              {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalCount)} / {totalCount.toLocaleString()}개
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={page === 0}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-4 h-4" /> 이전
+              </button>
+              <span className="text-sm text-gray-600">
+                {page + 1} / {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                disabled={page >= totalPages - 1}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                다음 <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {selectedProduct && (
@@ -235,7 +300,7 @@ function PriceTierModal({ product, onClose }: { product: Product; onClose: () =>
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center z-10">
           <div>
             <h2 className="text-lg font-bold text-gray-900">{product.name}</h2>
-            <p className="text-sm text-gray-500">{product.spec || "-"} · 공급가 ₩{(product.supply_price || 0).toLocaleString()}</p>
+            <p className="text-sm text-gray-500">{product.spec || "-"} · 공급가 {formatCurrency(product.supply_price)}</p>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-900">
             <X className="w-6 h-6" />
@@ -274,7 +339,7 @@ function PriceTierModal({ product, onClose }: { product: Product; onClose: () =>
                         {vendorTiers.map((tier) => (
                           <tr key={tier.id} className="border-t border-gray-200">
                             <td className="py-1.5 text-gray-700">{tier.min_qty.toLocaleString()}개 이상</td>
-                            <td className="py-1.5 text-right font-medium text-gray-900">₩{tier.unit_price.toLocaleString()}</td>
+                            <td className="py-1.5 text-right font-medium text-gray-900">{formatCurrency(tier.unit_price)}</td>
                             <td className="py-1.5 pl-3 text-gray-500 text-xs">{tier.note || ""}</td>
                             <td className="py-1.5">
                               <button
