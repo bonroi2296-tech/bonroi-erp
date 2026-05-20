@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import TopBar from "@/components/TopBar";
+import { useToast } from "@/components/Toast";
 import { supabase } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/format";
 import { Search, X, Plus, Trash2, TrendingDown, ChevronLeft, ChevronRight } from "lucide-react";
@@ -214,6 +215,7 @@ export default function ProductsPage() {
 
 // ===== 구간별 단가 관리 모달 =====
 function PriceTierModal({ product, onClose }: { product: Product; onClose: () => void }) {
+  const toast = useToast();
   const [tiers, setTiers] = useState<PriceTier[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -248,7 +250,7 @@ function PriceTierModal({ product, onClose }: { product: Product; onClose: () =>
 
   async function handleAdd() {
     if (!newVendorId || newMinQty < 1 || newUnitPrice < 1) {
-      alert("벤더, 최소수량, 단가를 모두 입력해주세요.");
+      toast.error("벤더, 최소수량, 단가를 모두 입력해주세요.");
       return;
     }
     setSaving(true);
@@ -261,9 +263,9 @@ function PriceTierModal({ product, onClose }: { product: Product; onClose: () =>
     });
     if (error) {
       if (error.code === "23505") {
-        alert("이미 같은 벤더/수량 구간이 등록되어 있습니다.");
+        toast.error("이미 같은 벤더/수량 구간이 등록되어 있습니다.");
       } else {
-        alert("저장 실패: " + error.message);
+        toast.error("저장 실패: " + error.message);
       }
     } else {
       setNewVendorId("");
@@ -279,7 +281,7 @@ function PriceTierModal({ product, onClose }: { product: Product; onClose: () =>
     if (!confirm("이 구간 단가를 삭제할까요?")) return;
     const { error } = await supabase.from("price_tiers").delete().eq("id", tierId);
     if (error) {
-      alert("삭제 실패: " + error.message);
+      toast.error("삭제 실패: " + error.message);
     } else {
       await fetchData();
     }

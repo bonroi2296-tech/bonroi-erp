@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import TopBar from "@/components/TopBar";
+import { useToast } from "@/components/Toast";
 import { supabase } from "@/lib/supabase";
 import { FileSpreadsheet, Download, Building2, Calendar, Loader2, CheckCircle2 } from "lucide-react";
 
@@ -17,16 +18,14 @@ interface MonthSummary {
   total_supply: number;
 }
 
-const MONTHS = [
-  { value: "2025-10", label: "2025년 10월" },
-  { value: "2025-11", label: "2025년 11월" },
-  { value: "2025-12", label: "2025년 12월" },
-  { value: "2026-01", label: "2026년 1월" },
-  { value: "2026-02", label: "2026년 2월" },
-  { value: "2026-03", label: "2026년 3월" },
-];
+// "YYYY-MM" → "YYYY년 M월"
+function monthLabel(month: string): string {
+  const [y, m] = month.split("-");
+  return `${y}년 ${Number(m)}월`;
+}
 
 export default function DocumentsPage() {
+  const toast = useToast();
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<string>("");
   const [selectedMonth, setSelectedMonth] = useState<string>("");
@@ -95,7 +94,7 @@ export default function DocumentsPage() {
       const res = await fetch(`/api/invoice?month=${m}&branch=${b}`);
       if (!res.ok) {
         const err = await res.json();
-        alert(err.error || "거래명세서 생성 실패");
+        toast.error(err.error || "거래명세서 생성 실패");
         return;
       }
       const blob = await res.blob();
@@ -117,7 +116,7 @@ export default function DocumentsPage() {
     setBatchLoading(true);
     setBatchProgress([]);
 
-    const targetMonths = ["2025-10", "2025-11", "2025-12", "2026-01", "2026-02"];
+    const targetMonths = [...summaries].map((s) => s.month).sort();
     const branchName = branches.find((b) => b.id === selectedBranch)?.name || "";
 
     for (const m of targetMonths) {
@@ -159,6 +158,8 @@ export default function DocumentsPage() {
   };
 
   const selectedBranchName = branches.find((b) => b.id === selectedBranch)?.name;
+  // 데이터가 있는 월 목록(최신순) — 하드코딩 대신 실제 주문 데이터에서 도출
+  const monthOptions = [...summaries].map((s) => s.month).sort((a, b) => b.localeCompare(a));
 
   return (
     <>
@@ -192,9 +193,11 @@ export default function DocumentsPage() {
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
               >
-                <option value="">월을 선택하세요</option>
-                {MONTHS.map((m) => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
+                <option value="">
+                  {selectedBranch ? "월을 선택하세요" : "병원을 먼저 선택하세요"}
+                </option>
+                {monthOptions.map((m) => (
+                  <option key={m} value={m}>{monthLabel(m)}</option>
                 ))}
               </select>
             </div>
@@ -209,14 +212,14 @@ export default function DocumentsPage() {
           </div>
         </div>
 
-        {/* 일괄 다운로드 (10월~2월) */}
-        {selectedBranch && (
+        {/* 일괄 다운로드 — 데이터가 있는 전체 기간 */}
+        {selectedBranch && monthOptions.length > 0 && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-base font-bold text-gray-900">10월~2월 일괄 다운로드</h3>
+                <h3 className="text-base font-bold text-gray-900">전체 기간 일괄 다운로드</h3>
                 <p className="text-sm text-gray-500 mt-1">
-                  {selectedBranchName}의 2025년 10월 ~ 2026년 2월 거래명세서를 한번에 생성합니다.
+                  {selectedBranchName}의 {monthLabel(monthOptions[monthOptions.length - 1])} ~ {monthLabel(monthOptions[0])} 거래명세서를 한번에 생성합니다.
                 </p>
               </div>
               <button
@@ -225,7 +228,7 @@ export default function DocumentsPage() {
                 className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
               >
                 {batchLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
-                5개월 일괄 생성
+                {monthOptions.length}개월 일괄 생성
               </button>
             </div>
             {batchProgress.length > 0 && (

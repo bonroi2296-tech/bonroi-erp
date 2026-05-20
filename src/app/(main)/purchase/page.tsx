@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import TopBar from "@/components/TopBar";
+import { useToast } from "@/components/Toast";
 import { supabase } from "@/lib/supabase";
 import { Send, Clock, CheckCircle, AlertCircle, Plus, ChevronDown, ChevronUp, X } from "lucide-react";
 
@@ -63,6 +64,7 @@ interface SummaryCardItem {
 
 // ===== Main Component =====
 export default function PurchasePage() {
+  const toast = useToast();
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -192,7 +194,7 @@ export default function PurchasePage() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       console.error("Error fetching data:", error);
-      alert("데이터를 불러오는데 실패했습니다.");
+      toast.error("데이터를 불러오는데 실패했습니다.");
     } finally {
       setLoading(false);
     }
@@ -212,7 +214,7 @@ export default function PurchasePage() {
       );
     } catch (error) {
       console.error("Error updating status:", error);
-      alert("상태 변경에 실패했습니다.");
+      toast.error("상태 변경에 실패했습니다.");
     }
   };
 
@@ -519,6 +521,7 @@ function CreatePurchaseOrderModal({
   orders,
   onClose,
 }: CreatePurchaseOrderModalProps) {
+  const toast = useToast();
   const [mode, setMode] = useState<"from_order" | "manual">("manual");
   const [selectedOrder, setSelectedOrder] = useState<string>("");
   const [selectedVendor, setSelectedVendor] = useState<string>("");
@@ -646,7 +649,7 @@ function CreatePurchaseOrderModal({
 
   const handleCreate = async () => {
     if (!selectedVendor || items.length === 0) {
-      alert("벤더와 항목을 선택해주세요.");
+      toast.error("벤더와 항목을 선택해주세요.");
       return;
     }
 
@@ -692,11 +695,11 @@ function CreatePurchaseOrderModal({
 
       if (itemsError) throw itemsError;
 
-      alert("발주가 생성되었습니다.");
+      toast.success("발주가 생성되었습니다.");
       onClose();
     } catch (error) {
       console.error("Error creating purchase order:", error);
-      alert("발주 생성에 실패했습니다.");
+      toast.error("발주 생성에 실패했습니다.");
     } finally {
       setCreating(false);
     }

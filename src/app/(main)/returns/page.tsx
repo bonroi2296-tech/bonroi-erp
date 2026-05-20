@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import TopBar from "@/components/TopBar";
+import { useToast } from "@/components/Toast";
 import { supabase } from "@/lib/supabase";
 import { Plus, Search, X } from "lucide-react";
 
@@ -70,6 +71,7 @@ const statusLabels: Record<string, string> = {
 };
 
 export default function ReturnsPage() {
+  const toast = useToast();
   const [returns, setReturns] = useState<Return[]>([]);
   const [summaryStats, setSummaryStats] = useState<SummaryStats>({
     total_returns: 0,
@@ -153,12 +155,12 @@ export default function ReturnsPage() {
 
   async function handleCreateReturn() {
     if (!selectedOrderItem) {
-      alert("주문 항목을 선택해주세요");
+      toast.error("주문 항목을 선택해주세요");
       return;
     }
 
     if (formData.quantity <= 0 || !formData.reason) {
-      alert("필수 항목을 입력해주세요");
+      toast.error("필수 항목을 입력해주세요");
       return;
     }
 
@@ -176,7 +178,7 @@ export default function ReturnsPage() {
     ]);
 
     if (error) {
-      alert("반품 등록 실패: " + error.message);
+      toast.error("반품 등록 실패: " + error.message);
       return;
     }
 
@@ -205,7 +207,7 @@ export default function ReturnsPage() {
       .eq("id", returnId);
 
     if (error) {
-      alert("상태 업데이트 실패: " + error.message);
+      toast.error("상태 업데이트 실패: " + error.message);
       return;
     }
 

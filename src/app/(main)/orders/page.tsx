@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback, Fragment } from "react";
 import TopBar from "@/components/TopBar";
+import { useToast } from "@/components/Toast";
 import { supabase } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/format";
 import { Plus, Search, ChevronDown, ChevronRight, X, Trash2, ChevronUp } from "lucide-react";
@@ -95,6 +96,7 @@ const statusColors: Record<string, string> = {
 const statusOptions = ["대기", "처리중", "발주완료", "완료", "확인필요"];
 
 export default function OrdersPage() {
+  const toast = useToast();
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -238,7 +240,7 @@ export default function OrdersPage() {
       );
     } catch (err) {
       console.error("Status update error:", err);
-      alert("상태 업데이트 중 오류가 발생했습니다.");
+      toast.error("상태 업데이트 중 오류가 발생했습니다.");
     }
   };
 
@@ -263,7 +265,7 @@ export default function OrdersPage() {
       setExpandedOrderId(orderId);
     } catch (err) {
       console.error("Order items fetch error:", err);
-      alert("품목 조회 중 오류가 발생했습니다.");
+      toast.error("품목 조회 중 오류가 발생했습니다.");
     } finally {
       setLoadingOrderItems((prev) => {
         const next = new Set(prev);
@@ -427,7 +429,7 @@ export default function OrdersPage() {
       await fetchOrders();
     } catch (err) {
       console.error("Order creation error:", err);
-      alert("주문 등록 중 오류가 발생했습니다.");
+      toast.error("주문 등록 중 오류가 발생했습니다.");
     } finally {
       setSubmitting(false);
     }
