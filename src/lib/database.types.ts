@@ -71,6 +71,60 @@ export type Database = {
         }
         Relationships: []
       }
+      demand_lines: {
+        Row: {
+          created_at: string | null
+          id: string
+          job_id: string
+          note: string | null
+          product_id: string | null
+          purpose: string | null
+          raw_name: string
+          required_qty: number
+          sort_order: number | null
+          unit_label: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          job_id: string
+          note?: string | null
+          product_id?: string | null
+          purpose?: string | null
+          raw_name: string
+          required_qty?: number
+          sort_order?: number | null
+          unit_label?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          job_id?: string
+          note?: string | null
+          product_id?: string | null
+          purpose?: string | null
+          raw_name?: string
+          required_qty?: number
+          sort_order?: number | null
+          unit_label?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "demand_lines_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "sourcing_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "demand_lines_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       expense_reports: {
         Row: {
           created_at: string | null
@@ -613,6 +667,104 @@ export type Database = {
             columns: ["order_item_id"]
             isOneToOne: false
             referencedRelation: "order_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sourcing_allocations: {
+        Row: {
+          created_at: string | null
+          demand_line_id: string
+          id: string
+          note: string | null
+          order_qty: number
+          shipped_qty: number | null
+          status: string
+          unit_price: number | null
+          updated_at: string | null
+          vendor_id: string | null
+          vendor_label: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          demand_line_id: string
+          id?: string
+          note?: string | null
+          order_qty?: number
+          shipped_qty?: number | null
+          status?: string
+          unit_price?: number | null
+          updated_at?: string | null
+          vendor_id?: string | null
+          vendor_label?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          demand_line_id?: string
+          id?: string
+          note?: string | null
+          order_qty?: number
+          shipped_qty?: number | null
+          status?: string
+          unit_price?: number | null
+          updated_at?: string | null
+          vendor_id?: string | null
+          vendor_label?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sourcing_allocations_demand_line_id_fkey"
+            columns: ["demand_line_id"]
+            isOneToOne: false
+            referencedRelation: "demand_lines"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sourcing_allocations_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sourcing_jobs: {
+        Row: {
+          branch_id: string | null
+          created_at: string | null
+          delivery_note: string | null
+          id: string
+          note: string | null
+          requester: string | null
+          status: string
+          title: string
+        }
+        Insert: {
+          branch_id?: string | null
+          created_at?: string | null
+          delivery_note?: string | null
+          id?: string
+          note?: string | null
+          requester?: string | null
+          status?: string
+          title: string
+        }
+        Update: {
+          branch_id?: string | null
+          created_at?: string | null
+          delivery_note?: string | null
+          id?: string
+          note?: string | null
+          requester?: string | null
+          status?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sourcing_jobs_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
             referencedColumns: ["id"]
           },
         ]

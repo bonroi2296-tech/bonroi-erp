@@ -6,12 +6,13 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   LayoutDashboard, Package, ShoppingCart, Truck, Send,
-  FileText, BarChart3, Settings, X, TrendingDown, RotateCcw, ClipboardList, ShieldAlert, LogOut
+  FileText, BarChart3, Settings, X, TrendingDown, RotateCcw, ClipboardList, ShieldAlert, LogOut, PackageSearch
 } from "lucide-react";
 
 const navItems = [
   { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
   { href: "/orders", icon: ShoppingCart, label: "주문 관리" },
+  { href: "/sourcing", icon: PackageSearch, label: "확보 관리" },
   { href: "/order-history", icon: ClipboardList, label: "주문 내역" },
   { href: "/products", icon: Package, label: "품목 마스터" },
   { href: "/price-compare", icon: TrendingDown, label: "단가 비교" },
