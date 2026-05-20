@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import ExcelJS from "exceljs";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { createSupabaseServerClient } from "@/lib/supabase-server";
 
 // 본로이 (공급자) 정보
 const SUPPLIER = {
@@ -83,6 +78,16 @@ export async function GET(request: NextRequest) {
 
   if (!month || !branchId) {
     return NextResponse.json({ error: "month and branch required" }, { status: 400 });
+  }
+
+  const supabase = createSupabaseServerClient();
+
+  // 인증 확인 — 로그인하지 않은 요청 차단
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
   }
 
   const [year, mon] = month.split("-").map(Number);

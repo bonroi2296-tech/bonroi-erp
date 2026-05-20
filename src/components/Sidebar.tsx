@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 import {
   LayoutDashboard, Package, ShoppingCart, Truck, Send,
-  FileText, BarChart3, Settings, X, TrendingDown, RotateCcw, ClipboardList, ShieldAlert
+  FileText, BarChart3, Settings, X, TrendingDown, RotateCcw, ClipboardList, ShieldAlert, LogOut
 } from "lucide-react";
 
 const navItems = [
@@ -29,6 +31,18 @@ interface SidebarProps {
 
 export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [email, setEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
+  }, []);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.replace("/login");
+    router.refresh();
+  };
 
   return (
     <aside
@@ -69,11 +83,20 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
       </nav>
       <div className="p-4 border-t border-gray-800">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-gray-700 rounded-full flex items-center justify-center text-sm font-bold">강</div>
+          <div className="w-9 h-9 bg-gray-700 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">
+            {(email?.[0] ?? "?").toUpperCase()}
+          </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">강주영</p>
+            <p className="text-sm font-medium truncate">{email ?? "로그인 정보 없음"}</p>
             <p className="text-xs text-gray-500">관리자</p>
           </div>
+          <button
+            onClick={handleSignOut}
+            title="로그아웃"
+            className="text-gray-400 hover:text-white p-1 flex-shrink-0"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </aside>

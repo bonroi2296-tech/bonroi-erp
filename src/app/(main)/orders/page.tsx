@@ -354,23 +354,31 @@ export default function OrdersPage() {
         vendorGroups.get(item.vendor_id)!.push(item);
       }
 
-      // 현재 최대 주문번호 조회
-      const { data: maxOrder } = await supabase
-        .from("orders")
-        .select("order_number")
-        .order("order_number", { ascending: false })
-        .limit(1);
-      let lastNum = 0;
-      if (maxOrder?.[0]) {
-        const match = maxOrder[0].order_number.match(/ORD-\d{4}-(\d+)/);
-        if (match) lastNum = parseInt(match[1]);
-      }
-
+      // 주문번호 발급: DB 시퀀스(next_order_number RPC) 우선,
+      // 마이그레이션 미적용 환경에서는 클라이언트 증분으로 폴백
       const year = new Date().getFullYear();
+      let fallbackNum: number | null = null;
+      const getOrderNumber = async (): Promise<string> => {
+        const { data, error } = await supabase.rpc("next_order_number");
+        if (!error && typeof data === "string") return data;
+        if (fallbackNum === null) {
+          const { data: maxOrder } = await supabase
+            .from("orders")
+            .select("order_number")
+            .order("order_number", { ascending: false })
+            .limit(1);
+          fallbackNum = 0;
+          if (maxOrder?.[0]) {
+            const match = maxOrder[0].order_number.match(/ORD-\d{4}-(\d+)/);
+            if (match) fallbackNum = parseInt(match[1]);
+          }
+        }
+        fallbackNum++;
+        return `ORD-${year}-${String(fallbackNum).padStart(4, "0")}`;
+      };
 
       for (const [vendorId, items] of Array.from(vendorGroups.entries())) {
-        lastNum++;
-        const orderNumber = `ORD-${year}-${String(lastNum).padStart(4, "0")}`;
+        const orderNumber = await getOrderNumber();
         const vendor = vendors.find((v) => v.id === vendorId);
         const product = products.find((p) => p.id === items[0].product_id);
         const category = product?.category || "양방";
