@@ -1,4 +1,5 @@
 import { createBrowserClient } from "@supabase/ssr";
+import type { Database } from "./database.types";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -11,4 +12,4 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 // 브라우저(클라이언트 컴포넌트)용 Supabase 클라이언트.
 // 쿠키 기반 세션을 사용하므로 미들웨어/서버에서도 동일 세션을 인식합니다.
-export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createBrowserClient<Database>(supabaseUrl, supabaseAnonKey);

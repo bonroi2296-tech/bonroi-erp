@@ -25,9 +25,16 @@ declare
     'returns',
     'price_history',
     'price_tiers',
-    'vendor_supply_status'
+    'vendor_supply_status',
+    'app_users',
+    'expense_reports',
+    'invoices'
   ];
 begin
+  -- 기존 과허용 정책 제거(anon 포함 USING(true)) — 어드바이저 rls_policy_always_true 대응
+  drop policy if exists "Allow all for returns" on public.returns;
+  drop policy if exists "Allow all for price_tiers" on public.price_tiers;
+
   foreach t in array tables loop
     -- 테이블이 존재하는 경우에만 처리
     if exists (

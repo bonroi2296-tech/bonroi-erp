@@ -370,7 +370,7 @@ export default function OrdersPage() {
             .order("order_number", { ascending: false })
             .limit(1);
           fallbackNum = 0;
-          if (maxOrder?.[0]) {
+          if (maxOrder?.[0]?.order_number) {
             const match = maxOrder[0].order_number.match(/ORD-\d{4}-(\d+)/);
             if (match) fallbackNum = parseInt(match[1]);
           }
@@ -406,7 +406,7 @@ export default function OrdersPage() {
           .select("id")
           .single();
 
-        if (orderError) throw orderError;
+        if (orderError || !orderData) throw orderError ?? new Error("주문 생성 실패");
 
         const orderItems = items.map((item) => ({
           order_id: orderData.id,

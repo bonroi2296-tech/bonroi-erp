@@ -75,7 +75,7 @@ export default function DashboardPage() {
         // 빠른 경로: DB에서 집계한 결과를 RPC로 받음 (마이그레이션 0003 적용 시)
         const { data: rpcData, error: rpcError } = await supabase.rpc("get_dashboard_stats");
         if (!rpcError && rpcData) {
-          const d = rpcData as DashboardStatsRpc;
+          const d = rpcData as unknown as DashboardStatsRpc;
           setStats({
             productCount: d.product_count,
             orderCount: d.order_count,

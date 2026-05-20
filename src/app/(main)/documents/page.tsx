@@ -48,37 +48,31 @@ export default function DocumentsPage() {
       return;
     }
     async function fetchSummaries() {
-      const { data } = await supabase.rpc("get_monthly_summary", { p_branch_id: selectedBranch });
-      if (data) {
-        setSummaries(data);
-      } else {
-        // Fallback: direct query
-        const { data: orders } = await supabase
-          .from("orders")
-          .select("order_date, order_items(total_supply)")
-          .eq("branch_id", selectedBranch);
+      const { data: orders } = await supabase
+        .from("orders")
+        .select("order_date, order_items(total_supply)")
+        .eq("branch_id", selectedBranch);
 
-        if (orders) {
-          const monthMap: Record<string, { orders: Set<string>; items: number; supply: number }> = {};
-          for (const o of orders) {
-            const m = (o.order_date as string).substring(0, 7);
-            if (!monthMap[m]) monthMap[m] = { orders: new Set(), items: 0, supply: 0 };
-            monthMap[m].orders.add(o.order_date as string);
-            const items = (o as { order_items: Array<{ total_supply: number }> }).order_items || [];
-            monthMap[m].items += items.length;
-            monthMap[m].supply += items.reduce((s: number, i: { total_supply: number }) => s + (i.total_supply || 0), 0);
-          }
-          setSummaries(
-            Object.entries(monthMap)
-              .map(([month, d]) => ({
-                month,
-                order_count: d.orders.size,
-                item_count: d.items,
-                total_supply: d.supply,
-              }))
-              .sort((a, b) => a.month.localeCompare(b.month))
-          );
+      if (orders) {
+        const monthMap: Record<string, { orders: Set<string>; items: number; supply: number }> = {};
+        for (const o of orders) {
+          const m = o.order_date.substring(0, 7);
+          if (!monthMap[m]) monthMap[m] = { orders: new Set(), items: 0, supply: 0 };
+          monthMap[m].orders.add(o.order_date);
+          const items = o.order_items || [];
+          monthMap[m].items += items.length;
+          monthMap[m].supply += items.reduce((s, i) => s + (i.total_supply || 0), 0);
         }
+        setSummaries(
+          Object.entries(monthMap)
+            .map(([month, d]) => ({
+              month,
+              order_count: d.orders.size,
+              item_count: d.items,
+              total_supply: d.supply,
+            }))
+            .sort((a, b) => a.month.localeCompare(b.month))
+        );
       }
     }
     fetchSummaries();

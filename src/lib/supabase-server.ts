@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import type { Database } from "./database.types";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -14,7 +15,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // 요청 쿠키로 로그인 세션을 인식하므로 RLS가 사용자 권한으로 적용됩니다.
 export function createSupabaseServerClient() {
   const cookieStore = cookies();
-  return createServerClient(supabaseUrl!, supabaseAnonKey!, {
+  return createServerClient<Database>(supabaseUrl!, supabaseAnonKey!, {
     cookies: {
       getAll() {
         return cookieStore.getAll();

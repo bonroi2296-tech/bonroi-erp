@@ -13,8 +13,8 @@ interface VendorPrice {
 interface ProductWithPrices {
   id: string;
   name: string;
-  spec: string;
-  category: string;
+  spec: string | null;
+  category: string | null;
   supply_price: number | null;
   vendors: Record<string, number | null>;
   lowest_price: number | null;
@@ -25,7 +25,7 @@ interface ProductWithPrices {
 interface VendorShippingInfo {
   id: string;
   name: string;
-  shipping_fee: number;
+  shipping_fee: number | null;
   free_shipping_min: number | null;
 }
 
@@ -83,7 +83,7 @@ export default function PriceComparePage() {
     });
     setFormData({
       name: product.name,
-      spec: product.spec,
+      spec: product.spec ?? "",
       supply_price: product.supply_price != null ? String(product.supply_price) : "",
       vendorPrices: vp,
     });
@@ -257,7 +257,7 @@ export default function PriceComparePage() {
           if (!vendorPriceMap[vp.product_id]) vendorPriceMap[vp.product_id] = [];
           vendorPriceMap[vp.product_id].push({
             vendor_name: vendorName,
-            unit_price: vp.unit_price,
+            unit_price: vp.unit_price ?? 0,
           });
         }
       }
@@ -330,7 +330,7 @@ export default function PriceComparePage() {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       filtered = filtered.filter(
-        (p) => p.name.toLowerCase().includes(q) || p.spec.toLowerCase().includes(q)
+        (p) => p.name.toLowerCase().includes(q) || (p.spec ?? "").toLowerCase().includes(q)
       );
     }
 

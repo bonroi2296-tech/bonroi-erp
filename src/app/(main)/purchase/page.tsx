@@ -10,47 +10,47 @@ import { Send, Clock, CheckCircle, AlertCircle, Plus, ChevronDown, ChevronUp, X 
 interface Vendor {
   id: string;
   name: string;
-  category: string;
-  shipping_fee: number;
-  free_shipping_min: number;
+  category: string | null;
+  shipping_fee: number | null;
+  free_shipping_min: number | null;
 }
 
 interface Product {
   id: string;
   name: string;
-  spec: string;
-  category: string;
-  supply_price: number;
+  spec: string | null;
+  category: string | null;
+  supply_price: number | null;
 }
 
 interface PurchaseOrderItem {
   id: string;
   purchase_order_id: string;
-  product_id: string;
+  product_id: string | null;
   quantity: number;
-  unit_price: number;
-  total_price: number;
-  created_at: string;
+  unit_price: number | null;
+  total_price: number | null;
+  created_at: string | null;
   product?: Product;
 }
 
 interface PurchaseOrder {
   id: string;
-  po_number: string;
+  po_number: string | null;
   vendor_id: string;
   order_id: string | null;
   po_date: string;
-  status: string;
-  total_amount: number;
-  shipping_cost: number;
-  created_at: string;
+  status: string | null;
+  total_amount: number | null;
+  shipping_cost: number | null;
+  created_at: string | null;
   vendor?: Vendor;
   items?: PurchaseOrderItem[];
 }
 
 interface Order {
   id: string;
-  order_number: string;
+  order_number: string | null;
 }
 
 interface SummaryCardItem {
@@ -104,7 +104,7 @@ export default function PurchasePage() {
 
       const poDate = new Date(po.po_date);
       if (poDate.getMonth() === currentMonth && poDate.getFullYear() === currentYear) {
-        thisMonth += po.total_amount + po.shipping_cost;
+        thisMonth += (po.total_amount ?? 0) + (po.shipping_cost ?? 0);
       }
     });
 
@@ -392,7 +392,7 @@ export default function PurchasePage() {
                         </td>
                         <td className="px-4 py-3 text-sm">
                           <select
-                            value={po.status}
+                            value={po.status ?? ""}
                             onChange={(e) => handleStatusChange(po.id, e.target.value)}
                             className="px-2 py-1 border border-gray-300 rounded text-xs font-medium"
                           >
@@ -404,13 +404,13 @@ export default function PurchasePage() {
                           </select>
                         </td>
                         <td className="px-4 py-3 text-sm text-right text-gray-900 font-medium">
-                          {po.total_amount.toLocaleString()}원
+                          {(po.total_amount ?? 0).toLocaleString()}원
                         </td>
                         <td className="px-4 py-3 text-sm text-right text-gray-900 font-medium">
-                          {po.shipping_cost.toLocaleString()}원
+                          {(po.shipping_cost ?? 0).toLocaleString()}원
                         </td>
                         <td className="px-4 py-3 text-sm text-right text-gray-900 font-bold">
-                          {(po.total_amount + po.shipping_cost).toLocaleString()}원
+                          {((po.total_amount ?? 0) + (po.shipping_cost ?? 0)).toLocaleString()}원
                         </td>
                       </tr>
 
@@ -454,10 +454,10 @@ export default function PurchasePage() {
                                             {item.quantity}
                                           </td>
                                           <td className="py-2 px-2 text-right text-gray-700">
-                                            {item.unit_price.toLocaleString()}원
+                                            {(item.unit_price ?? 0).toLocaleString()}원
                                           </td>
                                           <td className="py-2 px-2 text-right font-medium text-gray-900">
-                                            {item.total_price.toLocaleString()}원
+                                            {(item.total_price ?? 0).toLocaleString()}원
                                           </td>
                                         </tr>
                                       ))}
