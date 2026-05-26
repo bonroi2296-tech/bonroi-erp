@@ -23,6 +23,7 @@ interface Alloc {
 interface Demand {
   id: string;
   raw_name: string;
+  product_id: string | null;
   required_qty: number;
   unit_label: string | null;
   purpose: string | null;
@@ -41,6 +42,12 @@ interface Job {
 interface Vendor {
   id: string;
   name: string;
+}
+interface VendorOption {
+  vendor_id: string;
+  vendor_name: string;
+  price: number | null;
+  available: boolean;
 }
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -61,6 +68,7 @@ export default function SourcingDetailPage() {
   const toast = useToast();
   const [job, setJob] = useState<Job | null>(null);
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [vendorOptions, setVendorOptions] = useState<Record<string, VendorOption[]>>({});
   const [loading, setLoading] = useState(true);
 
   // 품목(수요줄) 추가 폼
@@ -73,7 +81,7 @@ export default function SourcingDetailPage() {
     const { data } = await supabase
       .from("sourcing_jobs")
       .select(
-        "id, title, requester, delivery_note, status, branch:branches(name), demand_lines(id, raw_name, required_qty, unit_label, purpose, sort_order, sourcing_allocations(id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty, note, vendor:vendors(name)))"
+        "id, title, requester, delivery_note, status, branch:branches(name), demand_lines(id, raw_name, product_id, required_qty, unit_label, purpose, sort_order, sourcing_allocations(id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty, note, vendor:vendors(name)))"
       )
       .eq("id", id)
       .single();
@@ -81,6 +89,51 @@ export default function SourcingDetailPage() {
       const j = data as unknown as Job;
       j.demand_lines = (j.demand_lines || []).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
       setJob(j);
+
+      // 매칭된 품목의 거래처 옵션(주문가능·최저가) 구성 — 동기화한 단가·공급상태 활용
+      const productIds = Array.from(
+        new Set(j.demand_lines.map((d) => d.product_id).filter((x): x is string => !!x))
+      );
+      if (productIds.length) {
+        const [vpRes, vssRes] = await Promise.all([
+          supabase
+            .from("vendor_products")
+            .select("product_id, vendor_id, unit_price, vendor:vendors(name)")
+            .in("product_id", productIds),
+          supabase
+            .from("vendor_supply_status")
+            .select("product_id, vendor_id")
+            .in("product_id", productIds),
+        ]);
+        const blocked = new Set(
+          ((vssRes.data as { product_id: string; vendor_id: string }[]) || []).map(
+            (s) => `${s.product_id}:${s.vendor_id}`
+          )
+        );
+        const map: Record<string, VendorOption[]> = {};
+        for (const r of (vpRes.data as unknown as {
+          product_id: string;
+          vendor_id: string;
+          unit_price: number | null;
+          vendor: { name: string } | null;
+        }[]) || []) {
+          (map[r.product_id] ||= []).push({
+            vendor_id: r.vendor_id,
+            vendor_name: r.vendor?.name ?? "?",
+            price: r.unit_price,
+            available: !blocked.has(`${r.product_id}:${r.vendor_id}`),
+          });
+        }
+        for (const k in map)
+          map[k].sort(
+            (a, b) =>
+              Number(b.available) - Number(a.available) ||
+              (a.price ?? Infinity) - (b.price ?? Infinity)
+          );
+        setVendorOptions(map);
+      } else {
+        setVendorOptions({});
+      }
     }
     setLoading(false);
   }, [id]);
@@ -243,6 +296,7 @@ export default function SourcingDetailPage() {
                 <AllocTable
                   allocs={d.sourcing_allocations}
                   vendors={vendors}
+                  options={d.product_id ? vendorOptions[d.product_id] ?? [] : []}
                   onAdd={(p) => addAlloc(d.id, p)}
                   onStatus={onStatusChange}
                   onShipped={(a, qty) => updateAlloc(a.id, { shipped_qty: qty })}
@@ -299,6 +353,7 @@ export default function SourcingDetailPage() {
 function AllocTable({
   allocs,
   vendors,
+  options,
   onAdd,
   onStatus,
   onShipped,
@@ -306,6 +361,7 @@ function AllocTable({
 }: {
   allocs: Alloc[];
   vendors: Vendor[];
+  options: VendorOption[];
   onAdd: (p: { vendor_id: string | null; vendor_label: string | null; order_qty: number; unit_price: number | null }) => void;
   onStatus: (a: Alloc, status: string) => void;
   onShipped: (a: Alloc, qty: number) => void;
@@ -315,6 +371,7 @@ function AllocTable({
   const [vendorText, setVendorText] = useState("");
   const [qty, setQty] = useState("");
   const [price, setPrice] = useState("");
+  const cheapestId = options.find((o) => o.available)?.vendor_id;
 
   const submit = () => {
     const isNew = vendorSel === "__new__";
@@ -366,6 +423,34 @@ function AllocTable({
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
+          ))}
+        </div>
+      )}
+
+      {options.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+          <span className="text-xs text-gray-400">추천:</span>
+          {options.map((o) => (
+            <button
+              key={o.vendor_id}
+              disabled={!o.available}
+              onClick={() => {
+                setVendorSel(o.vendor_id);
+                setPrice(o.price != null ? String(o.price) : "");
+              }}
+              title={o.available ? "클릭하면 단가 자동입력" : "품절/중단"}
+              className={`px-2 py-1 rounded-md text-xs border transition ${
+                !o.available
+                  ? "border-gray-200 text-gray-300 line-through cursor-not-allowed"
+                  : o.vendor_id === cheapestId
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-medium hover:bg-emerald-100"
+                  : "border-blue-200 text-blue-700 hover:bg-blue-50"
+              }`}
+            >
+              {o.vendor_id === cheapestId && o.available ? "최저 " : ""}
+              {o.vendor_name} {o.price != null ? o.price.toLocaleString() : "-"}
+              {!o.available ? " ⛔" : ""}
+            </button>
           ))}
         </div>
       )}
