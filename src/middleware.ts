@@ -7,6 +7,10 @@ const PUBLIC_PATHS = ["/login"];
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
 
+  // 로그인 게이트 토글: NEXT_PUBLIC_AUTH_ENABLED='true'일 때만 인증을 강제한다.
+  // 미설정이면 로그인 없이 접근 허용(현 운영 정책). 추후 'true'로 켜면 다시 잠긴다.
+  if (process.env.NEXT_PUBLIC_AUTH_ENABLED !== "true") return response;
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
