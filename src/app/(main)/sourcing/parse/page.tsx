@@ -97,8 +97,20 @@ export default function ParseOrderPage() {
           imageMimeType: image?.mime,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "분석 실패");
+      let data: { lines?: Line[]; error?: string } | null = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+      if (!res.ok || !data) {
+        throw new Error(
+          data?.error ||
+            (res.status === 504 || res.status === 502
+              ? "서버 응답이 지연됐어요(혼잡/시간초과 가능). 잠시 후 다시 'AI 분석'을 눌러주세요."
+              : "분석에 실패했어요. 잠시 후 다시 시도해 주세요.")
+        );
+      }
       const parsed: Line[] = data.lines || [];
       if (parsed.length === 0) toast.info("추출된 품목이 없습니다.");
       setLines(parsed);
