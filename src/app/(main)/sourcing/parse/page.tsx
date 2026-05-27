@@ -95,9 +95,10 @@ export default function ParseOrderPage() {
           text: text.trim() || undefined,
           imageBase64: image?.base64,
           imageMimeType: image?.mime,
+          branchId: branchId || undefined,
         }),
       });
-      let data: { lines?: Line[]; error?: string } | null = null;
+      let data: { lines?: Line[]; error?: string; detectedBranch?: Branch | null } | null = null;
       try {
         data = await res.json();
       } catch {
@@ -110,6 +111,10 @@ export default function ParseOrderPage() {
               ? "서버 응답이 지연됐어요(혼잡/시간초과 가능). 잠시 후 다시 'AI 분석'을 눌러주세요."
               : "분석에 실패했어요. 잠시 후 다시 시도해 주세요.")
         );
+      }
+      if (!branchId && data.detectedBranch?.id) {
+        setBranchId(data.detectedBranch.id);
+        toast.info(`지점 자동 감지: ${data.detectedBranch.name}`);
       }
       const parsed: Line[] = data.lines || [];
       if (parsed.length === 0) toast.info("추출된 품목이 없습니다.");
@@ -207,6 +212,17 @@ export default function ParseOrderPage() {
                 이미지 제거
               </button>
             )}
+            <select
+              value={branchId}
+              onChange={(e) => setBranchId(e.target.value)}
+              title="비워두면 주문 내용에서 지점을 자동 감지해 그 지점 이력으로 매칭합니다"
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700"
+            >
+              <option value="">지점 자동 감지</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
             <button
               onClick={analyze}
               disabled={analyzing}
