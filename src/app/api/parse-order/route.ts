@@ -52,13 +52,13 @@ export async function POST(request: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "GEMINI_API_KEY 미설정" }, { status: 500 });
 
-  let body: { text?: string; imageBase64?: string; imageMimeType?: string };
+  let body: { text?: string; imageBase64?: string; imageMimeType?: string; branchId?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "잘못된 요청" }, { status: 400 });
   }
-  const { text, imageBase64, imageMimeType } = body;
+  const { text, imageBase64, imageMimeType, branchId } = body;
   if (!text?.trim() && !imageBase64) {
     return NextResponse.json({ error: "주문 텍스트나 이미지를 입력하세요." }, { status: 400 });
   }
@@ -71,6 +71,31 @@ export async function POST(request: Request) {
   const { data: products } = await supabase.from("products").select("id, name, spec").order("name");
   const cat = (products as { id: string; name: string; spec: string | null }[]) || [];
   const catalogText = cat.map((p, i) => `${i}: ${p.name}${p.spec ? ` (${p.spec})` : ""}`).join("\n");
+
+  // 지점 결정: 수동 선택 우선, 없으면 주문 텍스트에서 지점명 자동 감지(예: "광명점"→광명면력한방병원)
+  const { data: branchRows } = await supabase.from("branches").select("id, name").order("name");
+  const allBranches = (branchRows as { id: string; name: string }[]) || [];
+  const normTxt = (s: string) => (s || "").toLowerCase().replace(/\s+/g, "");
+  const branchStem = (s: string) =>
+    normTxt(s).replace(/(면력)?한방병원$/, "").replace(/병원$/, "").replace(/(지점|점)$/, "");
+  let resolvedBranch: { id: string; name: string } | null = null;
+  if (branchId) resolvedBranch = allBranches.find((b) => b.id === branchId) ?? null;
+  if (!resolvedBranch && text?.trim()) {
+    const t = normTxt(text);
+    const byStem = allBranches
+      .map((b) => ({ b, stem: branchStem(b.name) }))
+      .filter((x) => x.stem.length >= 2)
+      .sort((a, b) => b.stem.length - a.stem.length);
+    for (const { b, stem } of byStem) {
+      if (t.includes(stem)) { resolvedBranch = b; break; }
+    }
+    if (!resolvedBranch) {
+      for (const b of allBranches) {
+        if (normTxt(b.name) && t.includes(normTxt(b.name))) { resolvedBranch = b; break; }
+      }
+    }
+  }
+  const resolvedBranchId = resolvedBranch?.id ?? null;
 
   let glines: GLine[] = [];
   try {
@@ -128,22 +153,28 @@ export async function POST(request: Request) {
     new Set(glines.flatMap((l) => l.match_indices.map((i) => cat[i]?.id).filter(Boolean)))
   ) as string[];
 
-  // 주문 이력(전지점) + 거래처가/공급상태 일괄 조회
-  const hist: Record<string, { cnt: number; last: string | null }> = {};
+  // 주문 이력(지점별 + 전지점) + 거래처가/공급상태 일괄 조회
+  const histBranch: Record<string, { cnt: number; last: string | null }> = {};
+  const histAll: Record<string, { cnt: number; last: string | null }> = {};
   const priceMap: Record<string, { vendor: string; price: number | null }[]> = {};
   try {
   if (matchedIds.length) {
     const [histRes, vpRes, vssRes] = await Promise.all([
-      supabase.from("order_items").select("product_id, orders(order_date)").in("product_id", matchedIds),
+      supabase.from("order_items").select("product_id, orders(order_date, branch_id)").in("product_id", matchedIds),
       supabase.from("vendor_products").select("product_id, unit_price, vendor:vendors(name)").in("product_id", matchedIds),
       supabase.from("vendor_supply_status").select("product_id, vendor:vendors(name)").in("product_id", matchedIds),
     ]);
-    for (const r of (histRes.data as unknown as { product_id: string; orders: { order_date: string } | null }[]) || []) {
+    for (const r of (histRes.data as unknown as { product_id: string; orders: { order_date: string; branch_id: string | null } | null }[]) || []) {
       if (!r.product_id) continue;
-      const h = (hist[r.product_id] ||= { cnt: 0, last: null });
-      h.cnt += 1;
       const d = r.orders?.order_date ?? null;
-      if (d && (!h.last || d > h.last)) h.last = d;
+      const ha = (histAll[r.product_id] ||= { cnt: 0, last: null });
+      ha.cnt += 1;
+      if (d && (!ha.last || d > ha.last)) ha.last = d;
+      if (resolvedBranchId && r.orders?.branch_id === resolvedBranchId) {
+        const hb = (histBranch[r.product_id] ||= { cnt: 0, last: null });
+        hb.cnt += 1;
+        if (d && (!hb.last || d > hb.last)) hb.last = d;
+      }
     }
     const blocked = new Set<string>();
     for (const s of (vssRes.data as unknown as { product_id: string; vendor: { name: string } | null }[]) || []) {
@@ -160,27 +191,41 @@ export async function POST(request: Request) {
     // 이력/거래처 조회 실패는 무시하고 추출 결과만 반환
   }
 
+  const branchName = resolvedBranch?.name ?? "";
   const lines = glines.map((l) => {
-    // 이력 많은 순으로 후보 재정렬
+    // 선택 지점 이력 우선, 동률·없으면 전지점 이력 순으로 후보 재정렬
     const candidates = l.match_indices
       .map((i) => cat[i])
       .filter(Boolean)
-      .map((p) => ({ id: p.id, name: p.name, spec: p.spec, cnt: hist[p.id]?.cnt ?? 0, last: hist[p.id]?.last ?? null }))
-      .sort((a, b) => b.cnt - a.cnt);
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        spec: p.spec,
+        bcnt: histBranch[p.id]?.cnt ?? 0,
+        blast: histBranch[p.id]?.last ?? null,
+        gcnt: histAll[p.id]?.cnt ?? 0,
+        glast: histAll[p.id]?.last ?? null,
+      }))
+      .sort((a, b) => b.bcnt - a.bcnt || b.gcnt - a.gcnt);
 
     const top = candidates[0];
-    const topCnt = top?.cnt ?? 0;
-    const totalCnt = candidates.reduce((s, c) => s + c.cnt, 0);
 
     let confidence = 0;
     let reason = "";
     let autoMatch = false;
     let note = l.note;
-    if (top && topCnt > 0) {
-      confidence = Math.min(98, Math.max(55, Math.round((topCnt / Math.max(totalCnt, 1)) * 100)));
-      reason = `이력 ${topCnt}건 · 최근 ${fmtDate(top.last)}`;
+    if (top && top.bcnt > 0) {
+      const totalB = candidates.reduce((s, c) => s + c.bcnt, 0);
+      confidence = Math.min(98, Math.max(60, Math.round((top.bcnt / Math.max(totalB, 1)) * 100)));
+      reason = `${branchName || "지점"} ${top.bcnt}건 · 최근 ${fmtDate(top.blast)}`;
       autoMatch = true;
-      if (topCnt >= 2 && confidence >= 70) note = ""; // 이력으로 확정되면 모호 플래그 해제
+      if (top.bcnt >= 2 && confidence >= 70) note = ""; // 지점 이력으로 확정되면 모호 플래그 해제
+    } else if (top && top.gcnt > 0) {
+      const totalG = candidates.reduce((s, c) => s + c.gcnt, 0);
+      confidence = Math.min(90, Math.max(50, Math.round((top.gcnt / Math.max(totalG, 1)) * 100)));
+      reason = `전지점 ${top.gcnt}건 · 최근 ${fmtDate(top.glast)}`;
+      autoMatch = true;
+      if (top.gcnt >= 2 && confidence >= 70) note = "";
     } else if (top) {
       confidence = 45;
       reason = "이름 매칭 · 이력 없음";
@@ -207,5 +252,5 @@ export async function POST(request: Request) {
     };
   });
 
-  return NextResponse.json({ lines });
+  return NextResponse.json({ lines, detectedBranch: resolvedBranch });
 }
