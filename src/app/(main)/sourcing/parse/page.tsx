@@ -18,7 +18,8 @@ interface Line {
   quantity: number;
   unit: string;
   purpose: string;
-  confidence: "high" | "medium" | "low";
+  confidence: number;
+  reason: string;
   note: string;
   candidates: Cand[];
   product_id: string;
@@ -31,11 +32,8 @@ interface Branch {
   name: string;
 }
 
-const CONF: Record<string, { label: string; cls: string }> = {
-  high: { label: "확정", cls: "bg-emerald-100 text-emerald-700" },
-  medium: { label: "후보 확인", cls: "bg-amber-100 text-amber-700" },
-  low: { label: "미확정/신규", cls: "bg-gray-100 text-gray-500" },
-};
+const confCls = (c: number) =>
+  c >= 70 ? "bg-emerald-100 text-emerald-700" : c >= 40 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-500";
 
 export default function ParseOrderPage() {
   const router = useRouter();
@@ -234,8 +232,8 @@ export default function ParseOrderPage() {
                         placeholder="단위"
                         className="w-14 px-2 py-1.5 border border-gray-200 rounded-lg text-sm"
                       />
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${CONF[l.confidence]?.cls ?? ""}`}>
-                        {CONF[l.confidence]?.label}
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${confCls(l.confidence)}`}>
+                        {l.confidence > 0 ? `${l.confidence}%` : "신규"}
                       </span>
                       <button onClick={() => setLines((p) => p.filter((_, j) => j !== i))} className="p-1 text-gray-300 hover:text-red-500">
                         <Trash2 className="w-4 h-4" />
@@ -254,6 +252,7 @@ export default function ParseOrderPage() {
                           </option>
                         ))}
                       </select>
+                      {l.reason && <span className="text-xs text-gray-400">{l.reason}</span>}
                       {l.product_id && l.best_vendor && (
                         <span className="text-xs text-emerald-700">
                           추천: {l.best_vendor} {l.best_price != null ? l.best_price.toLocaleString() : "-"}
