@@ -6,7 +6,7 @@ import Link from "next/link";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/Toast";
-import { ArrowLeft, Sparkles, Trash2, ImageUp, Plus, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Sparkles, Trash2, ImageUp, Plus, AlertTriangle, Search } from "lucide-react";
 
 interface Cand {
   id: string;
@@ -51,9 +51,55 @@ export default function ParseOrderPage() {
   const [deliveryNote, setDeliveryNote] = useState("");
   const [creating, setCreating] = useState(false);
 
+  // 사람이 직접 제품을 DB에서 찾아 교정
+  const [searchFor, setSearchFor] = useState<number | null>(null);
+  const [searchQ, setSearchQ] = useState("");
+  const [searchResults, setSearchResults] = useState<Cand[]>([]);
+  const [searching, setSearching] = useState(false);
+
   useEffect(() => {
     supabase.from("branches").select("id, name").order("name").then(({ data }) => setBranches((data as Branch[]) || []));
   }, []);
+
+  useEffect(() => {
+    if (searchFor === null) return;
+    const q = searchQ.trim().replace(/[%_]/g, " ");
+    if (!q) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
+    const t = setTimeout(async () => {
+      const { data } = await supabase
+        .from("products")
+        .select("id, name, spec")
+        .ilike("name", `%${q}%`)
+        .order("name")
+        .limit(20);
+      setSearchResults((data as Cand[]) || []);
+      setSearching(false);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [searchQ, searchFor]);
+
+  const openSearch = (i: number, prefill: string) => {
+    setSearchFor(i);
+    setSearchQ(prefill);
+    setSearchResults([]);
+  };
+  const closeSearch = () => {
+    setSearchFor(null);
+    setSearchQ("");
+    setSearchResults([]);
+  };
+  const pickProduct = (i: number, p: Cand) => {
+    setLines((prev) =>
+      prev.map((l, j) =>
+        j === i ? { ...l, product_id: p.id, candidates: [p, ...l.candidates.filter((c) => c.id !== p.id)] } : l
+      )
+    );
+    closeSearch();
+  };
 
   const onPickImage = (file: File | undefined | null) => {
     if (!file || !file.type.startsWith("image/")) return;
@@ -270,7 +316,10 @@ export default function ParseOrderPage() {
                     <div className="flex flex-wrap items-center gap-2 mt-1.5 pl-0.5">
                       <select
                         value={l.product_id}
-                        onChange={(e) => updateLine(i, { product_id: e.target.value })}
+                        onChange={(e) => {
+                          if (e.target.value === "__search__") openSearch(i, l.raw_name);
+                          else updateLine(i, { product_id: e.target.value });
+                        }}
                         className="flex-1 min-w-[200px] px-2 py-1.5 border border-gray-200 rounded-lg text-sm"
                       >
                         <option value="">매칭 안 함 (미확정)</option>
@@ -279,6 +328,7 @@ export default function ParseOrderPage() {
                             {c.name}{c.spec ? ` (${c.spec})` : ""}
                           </option>
                         ))}
+                        <option value="__search__">+ 직접 검색…</option>
                       </select>
                       {l.reason && <span className="text-xs text-gray-400">{l.reason}</span>}
                       {l.product_id && l.best_vendor && (
@@ -290,6 +340,38 @@ export default function ParseOrderPage() {
                         <span className="text-xs text-red-500">주문가능 거래처 없음(품절/미등록)</span>
                       )}
                     </div>
+                    {searchFor === i && (
+                      <div className="mt-2 p-2 border border-blue-200 rounded-lg bg-blue-50/40">
+                        <div className="flex items-center gap-2">
+                          <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                          <input
+                            autoFocus
+                            value={searchQ}
+                            onChange={(e) => setSearchQ(e.target.value)}
+                            placeholder="제품명으로 카탈로그 검색…"
+                            className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-sm"
+                          />
+                          <button onClick={closeSearch} className="text-xs text-gray-400 hover:text-gray-600 flex-shrink-0">
+                            닫기
+                          </button>
+                        </div>
+                        <div className="mt-1.5 max-h-44 overflow-auto">
+                          {searching && <p className="text-xs text-gray-400 px-1 py-1">검색 중…</p>}
+                          {!searching && searchQ.trim() && searchResults.length === 0 && (
+                            <p className="text-xs text-gray-400 px-1 py-1">결과 없음</p>
+                          )}
+                          {searchResults.map((p) => (
+                            <button
+                              key={p.id}
+                              onClick={() => pickProduct(i, p)}
+                              className="block w-full text-left px-2 py-1.5 text-sm rounded hover:bg-white"
+                            >
+                              {p.name}{p.spec ? ` (${p.spec})` : ""}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {l.note && (
                       <div className="flex items-center gap-1 mt-1 text-xs text-amber-600">
                         <AlertTriangle className="w-3 h-3" /> {l.note}
