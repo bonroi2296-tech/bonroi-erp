@@ -769,6 +769,60 @@ export type Database = {
           },
         ]
       }
+      sourcing_settlements: {
+        Row: {
+          created_at: string | null
+          doc_url: string | null
+          id: string
+          job_id: string
+          note: string | null
+          settled: boolean
+          shipping_fee: number
+          updated_at: string | null
+          vendor_id: string | null
+          vendor_label: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          doc_url?: string | null
+          id?: string
+          job_id: string
+          note?: string | null
+          settled?: boolean
+          shipping_fee?: number
+          updated_at?: string | null
+          vendor_id?: string | null
+          vendor_label?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          doc_url?: string | null
+          id?: string
+          job_id?: string
+          note?: string | null
+          settled?: boolean
+          shipping_fee?: number
+          updated_at?: string | null
+          vendor_id?: string | null
+          vendor_label?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sourcing_settlements_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "sourcing_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sourcing_settlements_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vendor_products: {
         Row: {
           id: string
@@ -870,6 +924,7 @@ export type Database = {
           payment_method: string | null
           return_policy: string | null
           shipping_fee: number | null
+          shipping_policy: string
           website_url: string | null
         }
         Insert: {
@@ -885,6 +940,7 @@ export type Database = {
           payment_method?: string | null
           return_policy?: string | null
           shipping_fee?: number | null
+          shipping_policy?: string
           website_url?: string | null
         }
         Update: {
@@ -900,6 +956,7 @@ export type Database = {
           payment_method?: string | null
           return_policy?: string | null
           shipping_fee?: number | null
+          shipping_policy?: string
           website_url?: string | null
         }
         Relationships: []
@@ -909,12 +966,12 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      get_dashboard_stats: { Args: Record<PropertyKey, never>; Returns: Json }
+      get_dashboard_stats: { Args: never; Returns: Json }
       get_price_at: {
         Args: { p_date?: string; p_product_id: string; p_vendor_id: string }
         Returns: number
       }
-      next_order_number: { Args: Record<PropertyKey, never>; Returns: string }
+      next_order_number: { Args: never; Returns: string }
     }
     Enums: {
       [_ in never]: never
