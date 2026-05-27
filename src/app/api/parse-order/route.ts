@@ -81,14 +81,36 @@ export async function POST(request: Request) {
     ];
     if (text?.trim()) parts.push({ text: `\n[주문 입력]\n${text.trim()}` });
     if (imageBase64) parts.push({ inlineData: { mimeType: imageMimeType || "image/png", data: imageBase64 } });
-    const res = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [{ role: "user", parts }],
-      config: { responseMimeType: "application/json", temperature: 0 },
-    });
+
+    // 일시 과부하(503/429) 시 자동 재시도 + 폴백 모델
+    const models = ["gemini-2.5-flash", "gemini-2.0-flash"];
+    let res: { text?: string } | null = null;
+    let lastErr: unknown = null;
+    outer: for (const model of models) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          res = await ai.models.generateContent({
+            model,
+            contents: [{ role: "user", parts }],
+            config: { responseMimeType: "application/json", temperature: 0 },
+          });
+          break outer;
+        } catch (e) {
+          lastErr = e;
+          const msg = String(e instanceof Error ? e.message : e);
+          if (!/(503|429|UNAVAILABLE|overload|high demand|RESOURCE_EXHAUSTED)/i.test(msg)) throw e;
+          await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+        }
+      }
+    }
+    if (!res) throw lastErr ?? new Error("모델 응답 없음");
     glines = extractJson(res.text ?? "");
   } catch (e) {
-    return NextResponse.json({ error: "AI 분석 실패: " + (e instanceof Error ? e.message : String(e)) }, { status: 502 });
+    const msg = e instanceof Error ? e.message : String(e);
+    const friendly = /(503|UNAVAILABLE|overload|high demand)/i.test(msg)
+      ? "Gemini가 일시적으로 과부하예요. 잠시 후 다시 시도해 주세요."
+      : "AI 분석 실패: " + msg;
+    return NextResponse.json({ error: friendly }, { status: 502 });
   }
 
   const matchedIds = Array.from(
