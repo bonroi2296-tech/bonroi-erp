@@ -5,7 +5,7 @@ import Link from "next/link";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/Toast";
-import { Plus, X, Trash2, PackageSearch, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Plus, X, Trash2, PackageSearch, AlertTriangle, CheckCircle2, Sparkles } from "lucide-react";
 
 interface AllocRow {
   order_qty: number;
@@ -151,12 +151,20 @@ export default function SourcingPage() {
       <div className="flex-1 p-4 md:p-6 space-y-4 overflow-auto">
         <div className="flex items-center justify-between">
           <p className="text-sm text-gray-500">총 {jobs.length}건</p>
-          <button
-            onClick={() => setModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
-          >
-            <Plus className="w-4 h-4" /> 새 발주건
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/sourcing/parse"
+              className="flex items-center gap-2 px-4 py-2 border border-blue-200 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-50"
+            >
+              <Sparkles className="w-4 h-4" /> 주문 붙여넣기
+            </Link>
+            <button
+              onClick={() => setModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4" /> 새 발주건
+            </button>
+          </div>
         </div>
 
         {loading ? (
