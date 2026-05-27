@@ -32,6 +32,7 @@ export default function ParseOrderPage() {
   const [text, setText] = useState("");
   const [image, setImage] = useState<{ base64: string; mime: string; name: string } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [lines, setLines] = useState<Line[]>([]);
 
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -45,15 +46,33 @@ export default function ParseOrderPage() {
     supabase.from("branches").select("id, name").order("name").then(({ data }) => setBranches((data as Branch[]) || []));
   }, []);
 
-  const onPickImage = (file: File | undefined) => {
-    if (!file) return;
+  const onPickImage = (file: File | undefined | null) => {
+    if (!file || !file.type.startsWith("image/")) return;
     const reader = new FileReader();
     reader.onload = () => {
       const res = String(reader.result);
       const base64 = res.split(",")[1] ?? "";
-      setImage({ base64, mime: file.type || "image/png", name: file.name });
+      setImage({ base64, mime: file.type || "image/png", name: file.name || "캡처 이미지" });
     };
     reader.readAsDataURL(file);
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const it of Array.from(items)) {
+      if (it.type.startsWith("image/")) {
+        onPickImage(it.getAsFile());
+        e.preventDefault();
+        return;
+      }
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    onPickImage(e.dataTransfer.files?.[0]);
   };
 
   const analyze = async () => {
@@ -135,18 +154,34 @@ export default function ParseOrderPage() {
         </Link>
 
         {/* 입력 */}
-        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          className={`bg-white rounded-xl border p-4 space-y-3 transition ${
+            dragOver ? "border-blue-400 border-dashed bg-blue-50/40" : "border-gray-200"
+          }`}
+        >
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onPaste={handlePaste}
             rows={5}
-            placeholder="예) 알콜스왑 30통, 5cc 주사기 5박스, 0.5cc 인슐린주사기 5박스 / 성동점 보내주세요"
+            placeholder="여기에 주문 텍스트 붙여넣기 — 또는 이미지를 Ctrl+V로 붙여넣거나 끌어다 놓으세요.&#10;예) 알콜스왑 30통, 5cc 주사기 5박스, 0.5cc 인슐린주사기 5박스 / 성동점 보내주세요"
             className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-y"
           />
+          {image && (
+            <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">
+              <ImageUp className="w-4 h-4" /> 이미지 첨부됨: {image.name}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm cursor-pointer hover:bg-gray-50">
               <ImageUp className="w-4 h-4" />
-              {image ? image.name : "이미지 첨부"}
+              이미지 파일 선택
               <input type="file" accept="image/*" className="hidden" onChange={(e) => onPickImage(e.target.files?.[0])} />
             </label>
             {image && (
