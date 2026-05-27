@@ -68,12 +68,34 @@ export async function POST(request: Request) {
   const supabase = url && anon ? createClient(url, anon) : null;
   if (!supabase) return NextResponse.json({ error: "DB 연결 불가" }, { status: 500 });
 
-  const { data: products } = await supabase.from("products").select("id, name, spec").order("name");
+  const [{ data: products }, { data: branchRows }, { data: dlRows }] = await Promise.all([
+    supabase.from("products").select("id, name, spec").order("name"),
+    supabase.from("branches").select("id, name").order("name"),
+    supabase.from("demand_lines").select("raw_name, product_id").not("product_id", "is", null).limit(5000),
+  ]);
   const cat = (products as { id: string; name: string; spec: string | null }[]) || [];
   const catalogText = cat.map((p, i) => `${i}: ${p.name}${p.spec ? ` (${p.spec})` : ""}`).join("\n");
 
+  // 후보 보강·학습용 보조 구조
+  const catById: Record<string, { id: string; name: string; spec: string | null }> = {};
+  for (const p of cat) catById[p.id] = p;
+  // 기본명(괄호·공백·기호 제거)으로 같은 제품군 묶기 — Gemini가 놓친 고빈도 변형 보강용
+  const norm = (s: string) => (s || "").toLowerCase().replace(/\([^)]*\)/g, " ").replace(/[^0-9a-z가-힣]+/g, "");
+  const baseMap: Record<string, string[]> = {};
+  for (const p of cat) {
+    const k = norm(p.name);
+    if (k) (baseMap[k] ||= []).push(p.id);
+  }
+  // 교정 학습: 과거에 사람이 확정한 raw_name → product_id (쓸수록 정확)
+  const learned: Record<string, Record<string, number>> = {};
+  for (const r of (dlRows as { raw_name: string; product_id: string }[]) || []) {
+    const k = norm(r.raw_name);
+    if (!k || !r.product_id) continue;
+    const m = (learned[k] ||= {});
+    m[r.product_id] = (m[r.product_id] || 0) + 1;
+  }
+
   // 지점 결정: 수동 선택 우선, 없으면 주문 텍스트에서 지점명 자동 감지(예: "광명점"→광명면력한방병원)
-  const { data: branchRows } = await supabase.from("branches").select("id, name").order("name");
   const allBranches = (branchRows as { id: string; name: string }[]) || [];
   const normTxt = (s: string) => (s || "").toLowerCase().replace(/\s+/g, "");
   const branchStem = (s: string) =>
@@ -149,9 +171,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: friendly }, { status: 502 });
   }
 
-  const matchedIds = Array.from(
-    new Set(glines.flatMap((l) => l.match_indices.map((i) => cat[i]?.id).filter(Boolean)))
-  ) as string[];
+  // 라인별 후보 = Gemini 후보 ∪ 교정학습 ∪ 동일 제품군(기본명) 보강
+  const lineCandIds: string[][] = glines.map((l) => {
+    const ids = new Set<string>();
+    const baseKeys = new Set<string>();
+    for (const i of l.match_indices) {
+      const p = cat[i];
+      if (!p) continue;
+      ids.add(p.id);
+      baseKeys.add(norm(p.name));
+    }
+    const lk = learned[norm(l.raw_name)];
+    if (lk) for (const pid in lk) if (catById[pid]) ids.add(pid);
+    for (const k of Array.from(baseKeys)) for (const pid of baseMap[k] || []) ids.add(pid);
+    return Array.from(ids);
+  });
+  const matchedIds = Array.from(new Set(lineCandIds.flat()));
 
   // 주문 이력(지점별 + 전지점) + 거래처가/공급상태 일괄 조회
   const histBranch: Record<string, { cnt: number; last: string | null }> = {};
@@ -192,21 +227,38 @@ export async function POST(request: Request) {
   }
 
   const branchName = resolvedBranch?.name ?? "";
-  const lines = glines.map((l) => {
-    // 선택 지점 이력 우선, 동률·없으면 전지점 이력 순으로 후보 재정렬
-    const candidates = l.match_indices
-      .map((i) => cat[i])
-      .filter(Boolean)
-      .map((p) => ({
-        id: p.id,
-        name: p.name,
-        spec: p.spec,
-        bcnt: histBranch[p.id]?.cnt ?? 0,
-        blast: histBranch[p.id]?.last ?? null,
-        gcnt: histAll[p.id]?.cnt ?? 0,
-        glast: histAll[p.id]?.last ?? null,
-      }))
-      .sort((a, b) => b.bcnt - a.bcnt || b.gcnt - a.gcnt);
+  const lines = glines.map((l, li) => {
+    const geminiIds = new Set<string>();
+    for (const i of l.match_indices) { const p = cat[i]; if (p) geminiIds.add(p.id); }
+    const lk = learned[norm(l.raw_name)] || {};
+
+    // 후보: 사람 확정(학습) >> 지점 이력 > 전지점 이력 순. 이력 없는 동일군 잡음은 제거
+    const candidates = (lineCandIds[li] || [])
+      .map((id) => {
+        const p = catById[id];
+        if (!p) return null;
+        return {
+          id: p.id,
+          name: p.name,
+          spec: p.spec,
+          learned: lk[p.id] || 0,
+          gemini: geminiIds.has(p.id),
+          bcnt: histBranch[p.id]?.cnt ?? 0,
+          blast: histBranch[p.id]?.last ?? null,
+          gcnt: histAll[p.id]?.cnt ?? 0,
+          glast: histAll[p.id]?.last ?? null,
+        };
+      })
+      .filter((c): c is NonNullable<typeof c> => !!c)
+      .filter((c) => c.gemini || c.learned > 0 || c.bcnt > 0 || c.gcnt > 0)
+      .sort(
+        (a, b) =>
+          b.learned - a.learned ||
+          b.bcnt - a.bcnt ||
+          b.gcnt - a.gcnt ||
+          Number(b.gemini) - Number(a.gemini)
+      )
+      .slice(0, 12);
 
     const top = candidates[0];
 
@@ -214,7 +266,14 @@ export async function POST(request: Request) {
     let reason = "";
     let autoMatch = false;
     let note = l.note;
-    if (top && top.bcnt > 0) {
+    if (top && top.learned > 0) {
+      // 사람이 예전에 이 이름을 이 제품으로 확정함 — 가장 강한 신호
+      confidence = Math.min(97, 82 + (top.learned - 1) * 5);
+      const extra = top.bcnt > 0 ? ` · ${branchName || "지점"} ${top.bcnt}건` : top.gcnt > 0 ? ` · 전지점 ${top.gcnt}건` : "";
+      reason = `이전 확정 ${top.learned}회${extra}`;
+      autoMatch = true;
+      note = "";
+    } else if (top && top.bcnt > 0) {
       const totalB = candidates.reduce((s, c) => s + c.bcnt, 0);
       // 근거(주문 건수)가 적으면 과신 금지 — 1건짜리가 98%로 보이지 않게 상한을 둠
       const cap = top.bcnt >= 5 ? 98 : top.bcnt >= 3 ? 92 : top.bcnt === 2 ? 85 : 75;
