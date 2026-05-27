@@ -216,16 +216,19 @@ export async function POST(request: Request) {
     let note = l.note;
     if (top && top.bcnt > 0) {
       const totalB = candidates.reduce((s, c) => s + c.bcnt, 0);
-      confidence = Math.min(98, Math.max(60, Math.round((top.bcnt / Math.max(totalB, 1)) * 100)));
+      // 근거(주문 건수)가 적으면 과신 금지 — 1건짜리가 98%로 보이지 않게 상한을 둠
+      const cap = top.bcnt >= 5 ? 98 : top.bcnt >= 3 ? 92 : top.bcnt === 2 ? 85 : 75;
+      confidence = Math.min(cap, Math.max(55, Math.round((top.bcnt / Math.max(totalB, 1)) * 100)));
       reason = `${branchName || "지점"} ${top.bcnt}건 · 최근 ${fmtDate(top.blast)}`;
       autoMatch = true;
       if (top.bcnt >= 2 && confidence >= 70) note = ""; // 지점 이력으로 확정되면 모호 플래그 해제
     } else if (top && top.gcnt > 0) {
       const totalG = candidates.reduce((s, c) => s + c.gcnt, 0);
-      confidence = Math.min(90, Math.max(50, Math.round((top.gcnt / Math.max(totalG, 1)) * 100)));
+      // 전지점 폴백은 더 보수적으로(지점 이력이 아님)
+      const cap = top.gcnt >= 5 ? 82 : top.gcnt >= 3 ? 70 : top.gcnt === 2 ? 60 : 50;
+      confidence = Math.min(cap, Math.max(45, Math.round((top.gcnt / Math.max(totalG, 1)) * 100)));
       reason = `전지점 ${top.gcnt}건 · 최근 ${fmtDate(top.glast)}`;
       autoMatch = true;
-      if (top.gcnt >= 2 && confidence >= 70) note = "";
     } else if (top) {
       confidence = 45;
       reason = "이름 매칭 · 이력 없음";
