@@ -7,10 +7,11 @@ import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/Toast";
 import type { TablesUpdate } from "@/lib/database.types";
-import { ArrowLeft, Plus, Trash2, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, AlertTriangle, CheckCircle2, Truck, Upload, X, Sparkles } from "lucide-react";
 
 interface Alloc {
   id: string;
+  demand_line_id: string;
   vendor_id: string | null;
   vendor_label: string | null;
   order_qty: number;
@@ -42,12 +43,41 @@ interface Job {
 interface Vendor {
   id: string;
   name: string;
+  shipping_fee?: number | null;
+  free_shipping_min?: number | null;
+  shipping_policy?: string | null;
 }
 interface VendorOption {
   vendor_id: string;
   vendor_name: string;
   price: number | null;
   available: boolean;
+}
+interface Settlement {
+  id: string;
+  vendor_id: string | null;
+  vendor_label: string | null;
+  shipping_fee: number;
+  settled: boolean;
+}
+// 거래처별 정산 묶음(발주건 전체의 할당을 거래처로 모음)
+interface VendorGroup {
+  key: string;
+  vendor_id: string | null;
+  vendor_label: string | null;
+  name: string;
+  policy: string;
+  freeMin: number;
+  flatFee: number;
+  subtotal: number;
+  allocs: Alloc[];
+}
+interface ReconcileRow {
+  demand_line_id: string | null;
+  matched_name: string | null;
+  doc_name: string;
+  qty: number;
+  unit_price: number | null;
 }
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -62,6 +92,20 @@ function securedOf(a: Alloc): number {
   if (a.status === "partial") return a.shipped_qty ?? 0;
   return 0;
 }
+// 정산 금액 기준 수량: 출고 확정 전(주문)이면 발주수량, 확정 후엔 실제 출고수량
+function billedQty(a: Alloc): number {
+  if (a.status === "shipped") return a.order_qty;
+  if (a.status === "partial") return a.shipped_qty ?? 0;
+  if (a.status === "unavailable") return 0;
+  return a.order_qty;
+}
+const won = (n: number) => `${Math.round(n).toLocaleString()}원`;
+// 규칙형 거래처 자동 배송비: 소계가 무료기준 이상이면 0, 아니면 정액
+function autoShip(g: { policy: string; freeMin: number; flatFee: number; subtotal: number }): number {
+  if (g.policy !== "auto") return 0;
+  if (g.freeMin > 0 && g.subtotal >= g.freeMin) return 0;
+  return g.flatFee || 0;
+}
 
 export default function SourcingDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -69,6 +113,8 @@ export default function SourcingDetailPage() {
   const [job, setJob] = useState<Job | null>(null);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [vendorOptions, setVendorOptions] = useState<Record<string, VendorOption[]>>({});
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [reconcileFor, setReconcileFor] = useState<VendorGroup | null>(null);
   const [loading, setLoading] = useState(true);
 
   // 품목(수요줄) 추가 폼
@@ -81,7 +127,7 @@ export default function SourcingDetailPage() {
     const { data } = await supabase
       .from("sourcing_jobs")
       .select(
-        "id, title, requester, delivery_note, status, branch:branches(name), demand_lines(id, raw_name, product_id, required_qty, unit_label, purpose, sort_order, sourcing_allocations(id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty, note, vendor:vendors(name)))"
+        "id, title, requester, delivery_note, status, branch:branches(name), demand_lines(id, raw_name, product_id, required_qty, unit_label, purpose, sort_order, sourcing_allocations(id, demand_line_id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty, note, vendor:vendors(name)))"
       )
       .eq("id", id)
       .single();
@@ -89,6 +135,12 @@ export default function SourcingDetailPage() {
       const j = data as unknown as Job;
       j.demand_lines = (j.demand_lines || []).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
       setJob(j);
+
+      supabase
+        .from("sourcing_settlements")
+        .select("id, vendor_id, vendor_label, shipping_fee, settled")
+        .eq("job_id", id)
+        .then(({ data: stl }) => setSettlements((stl as Settlement[]) || []));
 
       // 매칭된 품목의 거래처 옵션(주문가능·최저가) 구성 — 동기화한 단가·공급상태 활용
       const productIds = Array.from(
@@ -142,7 +194,7 @@ export default function SourcingDetailPage() {
     fetchJob();
     supabase
       .from("vendors")
-      .select("id, name")
+      .select("id, name, shipping_fee, free_shipping_min, shipping_policy")
       .order("name")
       .then(({ data }) => setVendors((data as Vendor[]) || []));
   }, [fetchJob]);
@@ -206,6 +258,86 @@ export default function SourcingDetailPage() {
     else updateAlloc(a.id, { status, shipped_qty: 0 });
   };
 
+  const settlementOf = (g: VendorGroup) =>
+    settlements.find((s) => (g.vendor_id ? s.vendor_id === g.vendor_id : s.vendor_label === g.vendor_label));
+
+  const upsertSettlement = async (g: VendorGroup, patch: { shipping_fee?: number; settled?: boolean }) => {
+    const existing = settlementOf(g);
+    if (existing) {
+      const { error } = await supabase
+        .from("sourcing_settlements")
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq("id", existing.id);
+      if (error) return toast.error(error.message);
+    } else {
+      const { error } = await supabase.from("sourcing_settlements").insert({
+        job_id: id,
+        vendor_id: g.vendor_id,
+        vendor_label: g.vendor_id ? null : g.vendor_label,
+        shipping_fee: patch.shipping_fee ?? 0,
+        settled: patch.settled ?? false,
+      });
+      if (error) return toast.error(error.message);
+    }
+    fetchJob();
+  };
+
+  // 출고확인서 분석 결과를 거래처별 할당에 반영(출고수량·단가·상태) + 배송비 정산
+  const applyReconcile = async (g: VendorGroup, rows: ReconcileRow[], shippingFee: number) => {
+    try {
+      for (const r of rows) {
+        if (!r.demand_line_id) continue;
+        const dline = job?.demand_lines.find((d) => d.id === r.demand_line_id);
+        const existing = dline?.sourcing_allocations.find((a) =>
+          g.vendor_id ? a.vendor_id === g.vendor_id : a.vendor_label === g.vendor_label
+        );
+        const qty = Number(r.qty) || 0;
+        const status = qty <= 0 ? "unavailable" : existing && qty < existing.order_qty ? "partial" : "shipped";
+        if (existing) {
+          const patch: TablesUpdate<"sourcing_allocations"> = {
+            unit_price: r.unit_price ?? existing.unit_price,
+            status,
+            shipped_qty: qty,
+            updated_at: new Date().toISOString(),
+          };
+          if (status === "shipped" && qty > existing.order_qty) patch.order_qty = qty;
+          const { error } = await supabase.from("sourcing_allocations").update(patch).eq("id", existing.id);
+          if (error) throw error;
+        } else if (qty > 0) {
+          const { error } = await supabase.from("sourcing_allocations").insert({
+            demand_line_id: r.demand_line_id,
+            vendor_id: g.vendor_id,
+            vendor_label: g.vendor_id ? null : g.vendor_label,
+            order_qty: qty,
+            unit_price: r.unit_price,
+            status,
+            shipped_qty: qty,
+          });
+          if (error) throw error;
+        }
+      }
+      const existingS = settlementOf(g);
+      if (existingS) {
+        await supabase
+          .from("sourcing_settlements")
+          .update({ shipping_fee: shippingFee, updated_at: new Date().toISOString() })
+          .eq("id", existingS.id);
+      } else {
+        await supabase.from("sourcing_settlements").insert({
+          job_id: id,
+          vendor_id: g.vendor_id,
+          vendor_label: g.vendor_id ? null : g.vendor_label,
+          shipping_fee: shippingFee,
+        });
+      }
+      toast.success("출고확인서를 반영했습니다.");
+      setReconcileFor(null);
+      fetchJob();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "반영 중 오류");
+    }
+  };
+
   if (loading) {
     return (
       <>
@@ -236,6 +368,39 @@ export default function SourcingDetailPage() {
     (s, d) => s + d.sourcing_allocations.reduce((a, x) => a + securedOf(x), 0),
     0
   );
+
+  // 거래처별 정산 묶음(발주건 전체의 할당을 거래처로 모음)
+  const groupMap = new Map<string, VendorGroup>();
+  for (const d of job.demand_lines) {
+    for (const a of d.sourcing_allocations) {
+      const key = a.vendor_id ? `v:${a.vendor_id}` : `l:${a.vendor_label ?? "미지정"}`;
+      let g = groupMap.get(key);
+      if (!g) {
+        const vinfo = a.vendor_id ? vendors.find((v) => v.id === a.vendor_id) : undefined;
+        g = {
+          key,
+          vendor_id: a.vendor_id,
+          vendor_label: a.vendor_id ? null : a.vendor_label ?? "미지정",
+          name: a.vendor?.name ?? a.vendor_label ?? "미지정",
+          policy: vinfo?.shipping_policy ?? "later",
+          freeMin: vinfo?.free_shipping_min ?? 0,
+          flatFee: vinfo?.shipping_fee ?? 0,
+          subtotal: 0,
+          allocs: [],
+        };
+        groupMap.set(key, g);
+      }
+      g.subtotal += billedQty(a) * (a.unit_price ?? 0);
+      g.allocs.push(a);
+    }
+  }
+  const groups = Array.from(groupMap.values()).sort((x, y) => y.subtotal - x.subtotal);
+  const shipOf = (g: VendorGroup) => {
+    const s = settlementOf(g);
+    return s ? s.shipping_fee : autoShip(g);
+  };
+  const jobItems = groups.reduce((s, g) => s + g.subtotal, 0);
+  const jobShip = groups.reduce((s, g) => s + shipOf(g), 0);
 
   return (
     <>
@@ -307,6 +472,35 @@ export default function SourcingDetailPage() {
           })}
         </div>
 
+        {/* 거래처별 정산 */}
+        {groups.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Truck className="w-4 h-4 text-gray-500" />
+              <h2 className="text-sm font-bold text-gray-900">거래처별 정산</h2>
+              <span className="text-xs text-gray-400">물품비 + 배송비 = 매입원가</span>
+            </div>
+            <div className="space-y-2">
+              {groups.map((g) => (
+                <SettlementRow
+                  key={g.key}
+                  group={g}
+                  settlement={settlementOf(g)}
+                  autoFee={autoShip(g)}
+                  onSaveShip={(fee) => upsertSettlement(g, { shipping_fee: fee })}
+                  onToggleSettled={(v) => upsertSettlement(g, { settled: v, shipping_fee: shipOf(g) })}
+                  onReconcile={() => setReconcileFor(g)}
+                />
+              ))}
+            </div>
+            <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap items-center justify-end gap-x-6 gap-y-1 text-sm">
+              <span className="text-gray-500">물품비 <b className="text-gray-900">{won(jobItems)}</b></span>
+              <span className="text-gray-500">배송비 <b className="text-gray-900">{won(jobShip)}</b></span>
+              <span className="text-gray-900 font-bold">총 매입원가 {won(jobItems + jobShip)}</span>
+            </div>
+          </div>
+        )}
+
         {/* 품목 추가 */}
         <div className="bg-white rounded-xl border border-dashed border-gray-300 p-4">
           <p className="text-xs font-medium text-gray-600 mb-2">품목 추가</p>
@@ -346,6 +540,17 @@ export default function SourcingDetailPage() {
           </div>
         </div>
       </div>
+
+      {reconcileFor && (
+        <ReconcileModal
+          jobId={id}
+          group={reconcileFor}
+          demandLines={job.demand_lines.map((d) => ({ id: d.id, raw_name: d.raw_name }))}
+          initialFee={shipOf(reconcileFor)}
+          onClose={() => setReconcileFor(null)}
+          onApply={(rows, fee) => applyReconcile(reconcileFor, rows, fee)}
+        />
+      )}
     </>
   );
 }
@@ -499,6 +704,271 @@ function AllocTable({
         >
           <Plus className="w-3.5 h-3.5" /> 거래처 추가
         </button>
+      </div>
+    </div>
+  );
+}
+
+function SettlementRow({
+  group,
+  settlement,
+  autoFee,
+  onSaveShip,
+  onToggleSettled,
+  onReconcile,
+}: {
+  group: VendorGroup;
+  settlement: Settlement | undefined;
+  autoFee: number;
+  onSaveShip: (fee: number) => void;
+  onToggleSettled: (v: boolean) => void;
+  onReconcile: () => void;
+}) {
+  const effectiveFee = settlement ? settlement.shipping_fee : autoFee;
+  const [fee, setFee] = useState(String(effectiveFee));
+  useEffect(() => {
+    setFee(String(effectiveFee));
+  }, [effectiveFee]);
+  const isLater = group.policy === "later";
+  const total = group.subtotal + (Number(fee) || 0);
+  const commit = () => {
+    const v = Number(fee) || 0;
+    if (v !== effectiveFee) onSaveShip(v);
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-gray-50 px-3 py-2.5 text-sm">
+      <span className="font-medium text-gray-900 min-w-[100px]">{group.name}</span>
+      <span
+        className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+          isLater ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
+        }`}
+        title={isLater ? "후책정: 정산 때 배송비를 직접 입력" : "규칙형: 무료기준 이상이면 0, 아니면 정액 자동"}
+      >
+        {isLater ? "후책정" : "자동"}
+      </span>
+      <span className="text-gray-500">물품 {won(group.subtotal)}</span>
+      <div className="flex items-center gap-1 ml-auto">
+        <span className="text-xs text-gray-400">배송비</span>
+        <input
+          type="number"
+          min={0}
+          value={fee}
+          onChange={(e) => setFee(e.target.value)}
+          onBlur={commit}
+          className="w-24 px-2 py-1 border border-gray-200 rounded-md text-sm text-right"
+        />
+        {!isLater && !settlement && autoFee === 0 && group.freeMin > 0 && (
+          <span className="text-[10px] text-emerald-600">무료</span>
+        )}
+      </div>
+      <span className="font-bold text-gray-900 min-w-[90px] text-right">{won(total)}</span>
+      <button
+        onClick={onReconcile}
+        className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-md text-xs text-gray-700 hover:bg-white"
+        title="출고확인서/명세서를 올려 실제 출고수량·단가·배송비를 반영"
+      >
+        <Upload className="w-3.5 h-3.5" /> 출고확인서
+      </button>
+      <label className="flex items-center gap-1 text-xs text-gray-500 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={settlement?.settled ?? false}
+          onChange={(e) => onToggleSettled(e.target.checked)}
+        />
+        마감
+      </label>
+    </div>
+  );
+}
+
+function ReconcileModal({
+  jobId,
+  group,
+  demandLines,
+  initialFee,
+  onClose,
+  onApply,
+}: {
+  jobId: string;
+  group: VendorGroup;
+  demandLines: { id: string; raw_name: string }[];
+  initialFee: number;
+  onClose: () => void;
+  onApply: (rows: ReconcileRow[], fee: number) => void;
+}) {
+  const toast = useToast();
+  const [text, setText] = useState("");
+  const [image, setImage] = useState<{ base64: string; mime: string; name: string } | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [rows, setRows] = useState<ReconcileRow[] | null>(null);
+  const [fee, setFee] = useState(initialFee);
+
+  const onPickImage = (file: File | undefined | null) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const res = String(reader.result);
+      setImage({ base64: res.split(",")[1] ?? "", mime: file.type || "image/png", name: file.name || "이미지" });
+    };
+    reader.readAsDataURL(file);
+  };
+  const handlePaste = (e: React.ClipboardEvent) => {
+    for (const it of Array.from(e.clipboardData?.items ?? [])) {
+      if (it.type.startsWith("image/")) {
+        onPickImage(it.getAsFile());
+        e.preventDefault();
+        return;
+      }
+    }
+  };
+
+  const analyze = async () => {
+    if (!text.trim() && !image) return toast.error("출고확인서 텍스트나 이미지를 넣으세요.");
+    setAnalyzing(true);
+    try {
+      const res = await fetch("/api/reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jobId,
+          text: text.trim() || undefined,
+          imageBase64: image?.base64,
+          imageMimeType: image?.mime,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) throw new Error(data?.error || "분석에 실패했어요. 잠시 후 다시 시도해 주세요.");
+      const items = (data.items as ReconcileRow[]) || [];
+      setRows(items);
+      if (typeof data.shipping_fee === "number" && data.shipping_fee > 0) setFee(data.shipping_fee);
+      if (items.length === 0) toast.info("추출된 품목이 없습니다.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "분석 오류");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const setRow = (i: number, patch: Partial<ReconcileRow>) =>
+    setRows((prev) => (prev ? prev.map((r, j) => (j === i ? { ...r, ...patch } : r)) : prev));
+
+  const itemsTotal = (rows ?? []).reduce((s, r) => s + (Number(r.qty) || 0) * (r.unit_price ?? 0), 0);
+  const matchedCount = (rows ?? []).filter((r) => r.demand_line_id).length;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-5 py-3 flex justify-between items-center">
+          <h2 className="text-base font-bold text-gray-900">{group.name} · 출고확인서 반영</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-5 space-y-4">
+          {!rows && (
+            <>
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onPaste={handlePaste}
+                rows={5}
+                placeholder="거래처 출고확인서/거래명세서 텍스트 붙여넣기 — 또는 이미지를 Ctrl+V로 붙여넣으세요."
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-y"
+              />
+              {image && (
+                <div className="text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">
+                  이미지 첨부됨: {image.name}
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm cursor-pointer hover:bg-gray-50">
+                  <Upload className="w-4 h-4" /> 이미지 선택
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => onPickImage(e.target.files?.[0])} />
+                </label>
+                <button
+                  onClick={analyze}
+                  disabled={analyzing}
+                  className="ml-auto flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                >
+                  <Sparkles className="w-4 h-4" /> {analyzing ? "분석 중..." : "AI 분석"}
+                </button>
+              </div>
+            </>
+          )}
+
+          {rows && (
+            <>
+              <p className="text-xs text-gray-500">
+                추출 {rows.length}건 · 매칭 {matchedCount}건 — 수량·단가·매칭을 확인하고 반영하세요.
+              </p>
+              <div className="space-y-2">
+                {rows.map((r, i) => (
+                  <div key={i} className="flex flex-wrap items-center gap-2 text-sm border-b border-gray-100 pb-2 last:border-0">
+                    <select
+                      value={r.demand_line_id ?? ""}
+                      onChange={(e) => setRow(i, { demand_line_id: e.target.value || null })}
+                      className={`flex-1 min-w-[170px] px-2 py-1.5 border rounded-lg text-sm ${
+                        r.demand_line_id ? "border-gray-200" : "border-amber-300 bg-amber-50"
+                      }`}
+                    >
+                      <option value="">매칭 안 함 (무시)</option>
+                      {demandLines.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.raw_name}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-xs text-gray-400 min-w-[70px] max-w-[120px] truncate" title={r.doc_name}>
+                      {r.doc_name}
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={r.qty}
+                      onChange={(e) => setRow(i, { qty: Number(e.target.value) })}
+                      title="출고수량"
+                      className="w-16 px-2 py-1.5 border border-gray-200 rounded-lg text-sm text-right"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={r.unit_price ?? ""}
+                      onChange={(e) => setRow(i, { unit_price: e.target.value === "" ? null : Number(e.target.value) })}
+                      placeholder="단가"
+                      className="w-24 px-2 py-1.5 border border-gray-200 rounded-lg text-sm text-right"
+                    />
+                    <button onClick={() => setRows((prev) => prev?.filter((_, j) => j !== i) ?? prev)} className="p-1 text-gray-300 hover:text-red-500">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 text-sm pt-1">
+                <span className="text-gray-500">배송비</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={fee}
+                  onChange={(e) => setFee(Number(e.target.value) || 0)}
+                  className="w-28 px-2 py-1.5 border border-gray-200 rounded-lg text-sm text-right"
+                />
+                <span className="ml-auto text-gray-500">
+                  물품 {won(itemsTotal)} · 합계 <b className="text-gray-900">{won(itemsTotal + fee)}</b>
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-5 py-3 flex gap-2 justify-end">
+          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
+            취소
+          </button>
+          {rows && (
+            <button onClick={() => onApply(rows, fee)} className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800">
+              반영
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
