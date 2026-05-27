@@ -42,7 +42,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (type: ToastType, message: string) => {
       const id = Date.now() + Math.random();
       setToasts((prev) => [...prev, { id, type, message }]);
-      setTimeout(() => remove(id), 4000);
+      setTimeout(() => remove(id), type === "error" ? 9000 : 4500);
     },
     [remove]
   );

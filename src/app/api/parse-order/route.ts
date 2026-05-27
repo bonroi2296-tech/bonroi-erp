@@ -82,34 +82,31 @@ export async function POST(request: Request) {
     if (text?.trim()) parts.push({ text: `\n[주문 입력]\n${text.trim()}` });
     if (imageBase64) parts.push({ inlineData: { mimeType: imageMimeType || "image/png", data: imageBase64 } });
 
-    // 일시 과부하(503/429) 시 자동 재시도 + 폴백 모델
+    // 과부하(503/429) 시 폴백 모델로 즉시 1회 재시도 (sleep 없음 — 함수 타임아웃 방지)
     const models = ["gemini-2.5-flash", "gemini-2.0-flash"];
     let res: { text?: string } | null = null;
     let lastErr: unknown = null;
-    outer: for (const model of models) {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          res = await ai.models.generateContent({
-            model,
-            contents: [{ role: "user", parts }],
-            config: { responseMimeType: "application/json", temperature: 0 },
-          });
-          break outer;
-        } catch (e) {
-          lastErr = e;
-          const msg = String(e instanceof Error ? e.message : e);
-          if (!/(503|429|UNAVAILABLE|overload|high demand|RESOURCE_EXHAUSTED)/i.test(msg)) throw e;
-          await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
-        }
+    for (const model of models) {
+      try {
+        res = await ai.models.generateContent({
+          model,
+          contents: [{ role: "user", parts }],
+          config: { responseMimeType: "application/json", temperature: 0 },
+        });
+        break;
+      } catch (e) {
+        lastErr = e;
+        const msg = String(e instanceof Error ? e.message : e);
+        if (!/(503|429|UNAVAILABLE|overload|high demand|RESOURCE_EXHAUSTED)/i.test(msg)) throw e;
       }
     }
     if (!res) throw lastErr ?? new Error("모델 응답 없음");
     glines = extractJson(res.text ?? "");
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    const friendly = /(503|UNAVAILABLE|overload|high demand)/i.test(msg)
-      ? "Gemini가 일시적으로 과부하예요. 잠시 후 다시 시도해 주세요."
-      : "AI 분석 실패: " + msg;
+    const friendly = /(503|UNAVAILABLE|overload|high demand|429|RESOURCE_EXHAUSTED)/i.test(msg)
+      ? "Gemini가 지금 과부하예요. 잠시 후 'AI 분석'을 다시 눌러주세요."
+      : "AI 분석에 실패했어요. 잠시 후 다시 시도해 주세요.";
     return NextResponse.json({ error: friendly }, { status: 502 });
   }
 
@@ -120,6 +117,7 @@ export async function POST(request: Request) {
   // 주문 이력(전지점) + 거래처가/공급상태 일괄 조회
   const hist: Record<string, { cnt: number; last: string | null }> = {};
   const priceMap: Record<string, { vendor: string; price: number | null }[]> = {};
+  try {
   if (matchedIds.length) {
     const [histRes, vpRes, vssRes] = await Promise.all([
       supabase.from("order_items").select("product_id, orders(order_date)").in("product_id", matchedIds),
@@ -143,6 +141,9 @@ export async function POST(request: Request) {
       (priceMap[r.product_id] ||= []).push({ vendor: vn, price: r.unit_price });
     }
     for (const k in priceMap) priceMap[k].sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
+  }
+  } catch {
+    // 이력/거래처 조회 실패는 무시하고 추출 결과만 반환
   }
 
   const lines = glines.map((l) => {
