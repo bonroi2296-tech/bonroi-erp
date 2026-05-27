@@ -75,33 +75,47 @@ export async function POST(request: Request) {
   let glines: GLine[] = [];
   try {
     const ai = new GoogleGenAI({ apiKey });
-    const parts: Array<Record<string, unknown>> = [
+    const base: Array<Record<string, unknown>> = [
       { text: SYS },
       { text: `\n[카탈로그]\n${catalogText}` },
     ];
-    if (text?.trim()) parts.push({ text: `\n[주문 입력]\n${text.trim()}` });
-    if (imageBase64) parts.push({ inlineData: { mimeType: imageMimeType || "image/png", data: imageBase64 } });
 
-    // 과부하(503/429) 시 폴백 모델로 즉시 1회 재시도 (sleep 없음 — 함수 타임아웃 방지)
-    const models = ["gemini-2.5-flash", "gemini-2.0-flash"];
-    let res: { text?: string } | null = null;
-    let lastErr: unknown = null;
-    for (const model of models) {
-      try {
-        res = await ai.models.generateContent({
-          model,
-          contents: [{ role: "user", parts }],
-          config: { responseMimeType: "application/json", temperature: 0 },
-        });
-        break;
-      } catch (e) {
-        lastErr = e;
-        const msg = String(e instanceof Error ? e.message : e);
-        if (!/(503|429|UNAVAILABLE|overload|high demand|RESOURCE_EXHAUSTED)/i.test(msg)) throw e;
+    // 빠른 모델 우선(thinking 끔). 과부하 시 즉시 폴백(sleep 없음).
+    const genOnce = async (parts: Array<Record<string, unknown>>): Promise<string> => {
+      const models = ["gemini-2.0-flash", "gemini-2.5-flash"];
+      let lastErr: unknown = null;
+      for (const model of models) {
+        try {
+          const cfg: Record<string, unknown> = { responseMimeType: "application/json", temperature: 0 };
+          if (model.includes("2.5")) cfg.thinkingConfig = { thinkingBudget: 0 };
+          const r = await ai.models.generateContent({ model, contents: [{ role: "user", parts }], config: cfg });
+          return r.text ?? "";
+        } catch (e) {
+          lastErr = e;
+          const msg = String(e instanceof Error ? e.message : e);
+          if (!/(503|429|UNAVAILABLE|overload|high demand|RESOURCE_EXHAUSTED)/i.test(msg)) throw e;
+        }
       }
+      throw lastErr ?? new Error("모델 응답 없음");
+    };
+
+    if (imageBase64) {
+      const parts = [...base];
+      if (text?.trim()) parts.push({ text: `\n[주문 입력]\n${text.trim()}` });
+      parts.push({ inlineData: { mimeType: imageMimeType || "image/png", data: imageBase64 } });
+      glines = extractJson(await genOnce(parts));
+    } else {
+      // 긴 주문은 줄 단위로 쪼개 병렬 처리(10초 함수 제한 대응)
+      const allLines = (text || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      const CH = 18;
+      const chunks: string[] = [];
+      for (let i = 0; i < allLines.length; i += CH) chunks.push(allLines.slice(i, i + CH).join("\n"));
+      if (chunks.length === 0) chunks.push(text || "");
+      const results = await Promise.all(
+        chunks.map((c) => genOnce([...base, { text: `\n[주문 입력]\n${c}` }]))
+      );
+      glines = results.flatMap((t) => extractJson(t));
     }
-    if (!res) throw lastErr ?? new Error("모델 응답 없음");
-    glines = extractJson(res.text ?? "");
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const friendly = /(503|UNAVAILABLE|overload|high demand|429|RESOURCE_EXHAUSTED)/i.test(msg)
