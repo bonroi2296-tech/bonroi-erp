@@ -11,26 +11,22 @@ interface GLine {
   unit: string;
   purpose: string;
   match_indices: number[];
-  confidence: "high" | "medium" | "low";
   note: string;
 }
 
 const SYS = `너는 의료소모품 유통사의 주문 접수 보조자다. 입력(병원 주문 메시지/이미지)과 [카탈로그]를 받아,
-주문 품목을 추출하고 각 품목을 카탈로그의 구체 품목에 매칭한다. JSON 배열만 출력한다.
+주문 품목을 추출하고 각 품목을 카탈로그의 후보 품목에 매칭한다. JSON 배열만 출력한다.
 
-각 원소: {"raw_name","quantity","unit","purpose","match_indices","confidence","note"}
+각 원소: {"raw_name","quantity","unit","purpose","match_indices","note"}
 - raw_name: 적힌 품목명 그대로(창작 금지)
 - quantity: 숫자만. 불명확하면 1
 - unit: 단위(개/박스/통/봉지/매/box 등). 없으면 ""
-- match_indices: 카탈로그에서 맞는 품목 번호를 가능성 높은 순으로 최대 3개. 없으면 []
-- confidence: 단일 품목으로 확정되면 "high", 후보 여럿이면 "medium", 카탈로그에 없거나 불확실하면 "low"
-- note: 사람이 확인해야 할 모호점만 짧게. 예: "게이지 미지정(23G/21G 중 확인)", "알콜솜 매수 미지정(100/200/400)", "카탈로그에 없음(신규)". 없으면 ""
-
-규칙:
-- 규격(cc·게이지·사이즈·매수)이 입력에 없으면 추측하지 말고 후보를 여러 개 담고 note에 "확인" 표기.
-- 제조사가 입력에 없고 카탈로그에 동일 규격이 한 제조사뿐이면 그걸 high로.
-- 배송지·인사말은 품목이 아니므로 제외.
-- 반드시 JSON 배열만. 코드펜스·설명 금지.`;
+- match_indices: 카탈로그에서 맞을 가능성이 있는 품목 번호를 **폭넓게** 최대 8개(가능성 높은 순).
+  반드시 동의어·표기변형을 고려해 다 담아라. 예: 스왑=솜=스폰지, 카테터=카테타, 글러브=장갑, 주사기/주사침, cc=ml.
+  규격(게이지·cc·사이즈·매수)이 입력에 없으면 같은 계열을 여러 개 담아라.
+- purpose: 용도/비고. 없으면 ""
+- note: 사람이 확인할 모호점만 짧게(게이지/매수 미지정 등). 없으면 ""
+- 배송지·인사말은 제외. JSON 배열만, 코드펜스·설명 금지.`;
 
 function extractJson(t: string): GLine[] {
   let s = (t || "").trim();
@@ -46,10 +42,11 @@ function extractJson(t: string): GLine[] {
     unit: String(r.unit ?? "").trim(),
     purpose: String(r.purpose ?? "").trim(),
     match_indices: Array.isArray(r.match_indices) ? r.match_indices.map((n: unknown) => Number(n)).filter((n: number) => Number.isInteger(n)) : [],
-    confidence: ["high", "medium", "low"].includes(r.confidence) ? r.confidence : "low",
     note: String(r.note ?? "").trim(),
   })).filter((r) => r.raw_name);
 }
+
+const fmtDate = (d: string | null) => (d ? d.slice(2).replace(/-/g, "/") : "");
 
 export async function POST(request: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -71,12 +68,10 @@ export async function POST(request: Request) {
   const supabase = url && anon ? createClient(url, anon) : null;
   if (!supabase) return NextResponse.json({ error: "DB 연결 불가" }, { status: 500 });
 
-  // 카탈로그 적재 (매칭용)
   const { data: products } = await supabase.from("products").select("id, name, spec").order("name");
   const cat = (products as { id: string; name: string; spec: string | null }[]) || [];
   const catalogText = cat.map((p, i) => `${i}: ${p.name}${p.spec ? ` (${p.spec})` : ""}`).join("\n");
 
-  // Gemini 추출 + 매칭
   let glines: GLine[] = [];
   try {
     const ai = new GoogleGenAI({ apiKey });
@@ -96,44 +91,79 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "AI 분석 실패: " + (e instanceof Error ? e.message : String(e)) }, { status: 502 });
   }
 
-  // 매칭 품목들의 거래처/최저가/공급상태 일괄 조회
   const matchedIds = Array.from(
     new Set(glines.flatMap((l) => l.match_indices.map((i) => cat[i]?.id).filter(Boolean)))
   ) as string[];
+
+  // 주문 이력(전지점) + 거래처가/공급상태 일괄 조회
+  const hist: Record<string, { cnt: number; last: string | null }> = {};
   const priceMap: Record<string, { vendor: string; price: number | null }[]> = {};
-  const blocked = new Set<string>();
   if (matchedIds.length) {
-    const [vpRes, vssRes] = await Promise.all([
+    const [histRes, vpRes, vssRes] = await Promise.all([
+      supabase.from("order_items").select("product_id, orders(order_date)").in("product_id", matchedIds),
       supabase.from("vendor_products").select("product_id, unit_price, vendor:vendors(name)").in("product_id", matchedIds),
-      supabase.from("vendor_supply_status").select("product_id, vendor_id, vendor:vendors(name)").in("product_id", matchedIds),
+      supabase.from("vendor_supply_status").select("product_id, vendor:vendors(name)").in("product_id", matchedIds),
     ]);
+    for (const r of (histRes.data as unknown as { product_id: string; orders: { order_date: string } | null }[]) || []) {
+      if (!r.product_id) continue;
+      const h = (hist[r.product_id] ||= { cnt: 0, last: null });
+      h.cnt += 1;
+      const d = r.orders?.order_date ?? null;
+      if (d && (!h.last || d > h.last)) h.last = d;
+    }
+    const blocked = new Set<string>();
     for (const s of (vssRes.data as unknown as { product_id: string; vendor: { name: string } | null }[]) || []) {
       if (s.vendor?.name) blocked.add(`${s.product_id}:${s.vendor.name}`);
     }
     for (const r of (vpRes.data as unknown as { product_id: string; unit_price: number | null; vendor: { name: string } | null }[]) || []) {
       const vn = r.vendor?.name ?? "?";
-      if (blocked.has(`${r.product_id}:${vn}`)) continue; // 품절/중단 제외
+      if (blocked.has(`${r.product_id}:${vn}`)) continue;
       (priceMap[r.product_id] ||= []).push({ vendor: vn, price: r.unit_price });
     }
     for (const k in priceMap) priceMap[k].sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
   }
 
   const lines = glines.map((l) => {
+    // 이력 많은 순으로 후보 재정렬
     const candidates = l.match_indices
       .map((i) => cat[i])
       .filter(Boolean)
-      .map((p) => ({ id: p.id, name: p.name, spec: p.spec }));
+      .map((p) => ({ id: p.id, name: p.name, spec: p.spec, cnt: hist[p.id]?.cnt ?? 0, last: hist[p.id]?.last ?? null }))
+      .sort((a, b) => b.cnt - a.cnt);
+
     const top = candidates[0];
+    const topCnt = top?.cnt ?? 0;
+    const totalCnt = candidates.reduce((s, c) => s + c.cnt, 0);
+
+    let confidence = 0;
+    let reason = "";
+    let autoMatch = false;
+    let note = l.note;
+    if (top && topCnt > 0) {
+      confidence = Math.min(98, Math.max(55, Math.round((topCnt / Math.max(totalCnt, 1)) * 100)));
+      reason = `이력 ${topCnt}건 · 최근 ${fmtDate(top.last)}`;
+      autoMatch = true;
+      if (topCnt >= 2 && confidence >= 70) note = ""; // 이력으로 확정되면 모호 플래그 해제
+    } else if (top) {
+      confidence = 45;
+      reason = "이름 매칭 · 이력 없음";
+      autoMatch = false;
+    } else {
+      confidence = 0;
+      reason = "카탈로그에 없음(신규)";
+    }
+
     const best = top ? priceMap[top.id]?.[0] : undefined;
     return {
       raw_name: l.raw_name,
       quantity: l.quantity,
       unit: l.unit,
       purpose: l.purpose,
-      confidence: l.confidence,
-      note: l.note,
-      candidates,
-      product_id: l.confidence === "high" && top ? top.id : "",
+      confidence,
+      reason,
+      note,
+      candidates: candidates.map((c) => ({ id: c.id, name: c.name, spec: c.spec })),
+      product_id: autoMatch && top ? top.id : "",
       best_vendor: best ? best.vendor : null,
       best_price: best ? best.price : null,
       sourceable: top ? (priceMap[top.id]?.length ?? 0) > 0 : false,
