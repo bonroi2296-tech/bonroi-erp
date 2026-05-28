@@ -15,6 +15,10 @@ interface Product {
   spec: string;
   category: string;
   supply_price: number;
+  image_url: string | null;
+  pack_size: number | null;
+  pack_unit: string | null;
+  description: string | null;
   vendor_products: { unit_price: number; is_lowest: boolean; vendor: { name: string } }[];
 }
 
@@ -61,7 +65,7 @@ export default function ProductsPage() {
       let query = supabase
         .from("products")
         .select(
-          "id, name, spec, category, supply_price, vendor_products(unit_price, is_lowest, vendor:vendors(name))",
+          "id, name, spec, category, supply_price, image_url, pack_size, pack_unit, description, vendor_products(unit_price, is_lowest, vendor:vendors(name))",
           { count: "exact" }
         );
 
@@ -310,6 +314,8 @@ function PriceTierModal({ product, onClose }: { product: Product; onClose: () =>
         </div>
 
         <div className="p-6 space-y-6">
+          <ProductInfoEditor product={product} />
+
           {/* 기존 구간 단가 목록 */}
           <div>
             <div className="flex items-center gap-2 mb-3">
@@ -419,6 +425,79 @@ function PriceTierModal({ product, onClose }: { product: Product; onClose: () =>
             >
               {saving ? "저장 중..." : "구간 추가"}
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== 제품 정보(쇼핑몰 베이스) 편집 =====
+function ProductInfoEditor({ product }: { product: Product }) {
+  const toast = useToast();
+  const [imageUrl, setImageUrl] = useState(product.image_url ?? "");
+  const [packSize, setPackSize] = useState(product.pack_size != null ? String(product.pack_size) : "");
+  const [packUnit, setPackUnit] = useState(product.pack_unit ?? "");
+  const [description, setDescription] = useState(product.description ?? "");
+
+  const save = async (patch: { image_url?: string | null; pack_size?: number | null; pack_unit?: string | null; description?: string | null }) => {
+    const { error } = await supabase.from("products").update(patch).eq("id", product.id);
+    if (error) toast.error("저장 실패: " + error.message);
+  };
+
+  return (
+    <div className="bg-blue-50/30 rounded-lg p-3 border border-blue-100">
+      <p className="text-xs font-semibold text-gray-700 mb-2">제품 정보 (쇼핑몰 베이스)</p>
+      <div className="flex gap-3">
+        <div className="w-20 h-20 bg-white border border-gray-200 rounded-md overflow-hidden flex items-center justify-center text-[10px] text-gray-400 flex-shrink-0">
+          {imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={imageUrl} alt="" className="w-full h-full object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          ) : (
+            "사진 없음"
+          )}
+        </div>
+        <div className="flex-1 space-y-2">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500 w-20 flex-shrink-0">사진 URL</label>
+            <input
+              type="url"
+              value={imageUrl}
+              onChange={(e) => setImageUrl(e.target.value)}
+              onBlur={() => save({ image_url: imageUrl.trim() || null })}
+              placeholder="https://..."
+              className="flex-1 min-w-0 px-2 py-1 border border-gray-200 rounded text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500 w-20 flex-shrink-0">박스당 수량</label>
+            <input
+              type="number"
+              min={0}
+              value={packSize}
+              onChange={(e) => setPackSize(e.target.value)}
+              onBlur={() => save({ pack_size: packSize === "" ? null : Number(packSize) })}
+              className="w-24 px-2 py-1 border border-gray-200 rounded text-xs text-right focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <input
+              type="text"
+              value={packUnit}
+              onChange={(e) => setPackUnit(e.target.value)}
+              onBlur={() => save({ pack_unit: packUnit.trim() || null })}
+              placeholder="EA, 매, 개..."
+              className="w-24 px-2 py-1 border border-gray-200 rounded text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
+          <div className="flex items-start gap-2">
+            <label className="text-xs text-gray-500 w-20 flex-shrink-0 mt-1">짧은 설명</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              onBlur={() => save({ description: description.trim() || null })}
+              placeholder="용도·특이사항 등"
+              rows={2}
+              className="flex-1 min-w-0 px-2 py-1 border border-gray-200 rounded text-xs resize-y focus:ring-2 focus:ring-blue-500 outline-none"
+            />
           </div>
         </div>
       </div>
