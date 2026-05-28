@@ -121,62 +121,54 @@ export default function ProductsPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          {loading ? (
-            <div className="flex items-center justify-center py-16">
-              <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" />
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs md:text-sm min-w-[700px]">
-                <thead>
-                  <tr className="bg-gray-50 text-gray-500">
-                    <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">품목명</th>
-                    <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">규격</th>
-                    <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">구분</th>
-                    <th className="text-right px-4 md:px-5 py-2.5 md:py-3 font-medium">공급가</th>
-                    <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">최저가 벤더</th>
-                    <th className="text-right px-4 md:px-5 py-2.5 md:py-3 font-medium">최저가</th>
-                    <th className="text-center px-4 md:px-5 py-2.5 md:py-3 font-medium">벤더 수</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {products.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="px-5 py-12 text-center text-gray-400">
-                        조건에 맞는 품목이 없습니다
-                      </td>
-                    </tr>
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" />
+          </div>
+        ) : products.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-200 py-16 text-center text-gray-400 text-sm">
+            조건에 맞는 품목이 없습니다
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+            {products.map((product) => (
+              <button
+                key={product.id}
+                onClick={() => setSelectedProduct(product)}
+                className="bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-md hover:border-blue-300 transition text-left flex flex-col"
+              >
+                <div className="aspect-square bg-gray-50 flex items-center justify-center relative">
+                  {product.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={product.image_url}
+                      alt={product.name}
+                      className="w-full h-full object-contain"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  ) : (
+                    <span className="text-[11px] text-gray-300">사진 없음</span>
                   )}
-                  {products.map((product) => {
-                    const lowest = product.vendor_products?.find(vp => vp.is_lowest);
-                    const lowestPrice = lowest?.unit_price || Math.min(...(product.vendor_products?.map(vp => vp.unit_price) || [0]));
-                    const lowestVendor = lowest ? (lowest.vendor as unknown as { name: string })?.name : (product.vendor_products?.[0]?.vendor as unknown as { name: string })?.name || "-";
-                    return (
-                      <tr
-                        key={product.id}
-                        className="hover:bg-gray-50 transition-colors cursor-pointer"
-                        onClick={() => setSelectedProduct(product)}
-                      >
-                        <td className="px-4 md:px-5 py-2.5 md:py-3 font-medium text-gray-900">{product.name}</td>
-                        <td className="px-4 md:px-5 py-2.5 md:py-3 text-gray-600">{product.spec || "-"}</td>
-                        <td className="px-4 md:px-5 py-2.5 md:py-3">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                            product.category === "양방" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"
-                          }`}>{product.category}</span>
-                        </td>
-                        <td className="px-4 md:px-5 py-2.5 md:py-3 text-right text-gray-900">{formatCurrency(product.supply_price)}</td>
-                        <td className="px-4 md:px-5 py-2.5 md:py-3 text-gray-600">{lowestVendor}</td>
-                        <td className="px-4 md:px-5 py-2.5 md:py-3 text-right text-emerald-600 font-medium">{formatCurrency(lowestPrice)}</td>
-                        <td className="px-4 md:px-5 py-2.5 md:py-3 text-center text-gray-500">{product.vendor_products?.length || 0}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                  {product.category && (
+                    <span className={`absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                      product.category === "양방" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"
+                    }`}>{product.category}</span>
+                  )}
+                </div>
+                <div className="p-2.5 space-y-0.5 flex-1">
+                  <p className="text-sm font-semibold text-gray-900 line-clamp-2 leading-snug">{product.name}</p>
+                  {product.spec && <p className="text-xs text-gray-500 line-clamp-1">{product.spec}</p>}
+                  {product.pack_size != null && (
+                    <p className="text-xs text-gray-600">
+                      {product.pack_size}{product.pack_unit ? ` ${product.pack_unit}` : ""}
+                    </p>
+                  )}
+                  {product.description && <p className="text-[11px] text-gray-400 line-clamp-1">{product.description}</p>}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* 페이지네이션 */}
         {totalCount > PAGE_SIZE && (
