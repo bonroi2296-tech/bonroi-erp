@@ -6,10 +6,15 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   LayoutDashboard, Package, ShoppingCart, Truck, Send,
-  FileText, BarChart3, Settings, X, TrendingDown, RotateCcw, ClipboardList, ShieldAlert, LogOut, PackageSearch
+  FileText, BarChart3, Settings, X, TrendingDown, RotateCcw, ClipboardList, ShieldAlert, LogOut, PackageSearch,
+  type LucideIcon,
 } from "lucide-react";
 
-const navItems = [
+type NavItem = { href: string; icon: LucideIcon; label: string; hidden?: boolean };
+
+// hidden:true = 미사용 화면. 메뉴에서만 숨기고 라우트·코드는 보존(PROJECT_CONTEXT 결정#2).
+// 부활 시 hidden 만 떼면 됨.
+const navItems: NavItem[] = [
   { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
   { href: "/orders", icon: ShoppingCart, label: "주문 관리" },
   { href: "/sourcing", icon: PackageSearch, label: "확보 관리" },
@@ -18,10 +23,10 @@ const navItems = [
   { href: "/price-compare", icon: TrendingDown, label: "단가 비교" },
   { href: "/vendors", icon: Truck, label: "벤더 관리" },
   { href: "/supply-monitor", icon: ShieldAlert, label: "공급망 관리" },
-  { href: "/purchase", icon: Send, label: "발주 관리" },
-  { href: "/returns", icon: RotateCcw, label: "반품 관리" },
-  { href: "/documents", icon: FileText, label: "문서 생성" },
-  { href: "/analytics", icon: BarChart3, label: "분석/리포트" },
+  { href: "/purchase", icon: Send, label: "발주 관리", hidden: true },
+  { href: "/returns", icon: RotateCcw, label: "반품 관리", hidden: true },
+  { href: "/documents", icon: FileText, label: "문서 생성", hidden: true },
+  { href: "/analytics", icon: BarChart3, label: "분석/리포트", hidden: true },
   { href: "/settings", icon: Settings, label: "설정" },
 ];
 
@@ -64,7 +69,7 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
         </button>
       </div>
       <nav className="flex-1 py-4 space-y-1 px-3 overflow-y-auto">
-        {navItems.map((item) => {
+        {navItems.filter((item) => !item.hidden).map((item) => {
           const Icon = item.icon;
           const active = pathname.startsWith(item.href);
           return (
