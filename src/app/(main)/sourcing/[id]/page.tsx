@@ -7,7 +7,7 @@ import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/Toast";
 import type { TablesUpdate } from "@/lib/database.types";
-import { ArrowLeft, Plus, Trash2, AlertTriangle, CheckCircle2, Truck, Upload, X, Sparkles } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, AlertTriangle, CheckCircle2, Truck, Upload, X, Sparkles, Copy } from "lucide-react";
 
 interface Alloc {
   id: string;
@@ -61,6 +61,13 @@ interface Settlement {
   settled: boolean;
 }
 // 거래처별 정산 묶음(발주건 전체의 할당을 거래처로 모음)
+interface VendorItem {
+  name: string;
+  unit: string | null;
+  qty: number;
+  price: number | null;
+  status: string;
+}
 interface VendorGroup {
   key: string;
   vendor_id: string | null;
@@ -71,6 +78,7 @@ interface VendorGroup {
   flatFee: number;
   subtotal: number;
   allocs: Alloc[];
+  items: VendorItem[];
 }
 interface ReconcileRow {
   demand_line_id: string | null;
@@ -387,11 +395,14 @@ export default function SourcingDetailPage() {
           flatFee: vinfo?.shipping_fee ?? 0,
           subtotal: 0,
           allocs: [],
+          items: [],
         };
         groupMap.set(key, g);
       }
-      g.subtotal += billedQty(a) * (a.unit_price ?? 0);
+      const qty = billedQty(a);
+      g.subtotal += qty * (a.unit_price ?? 0);
       g.allocs.push(a);
+      g.items.push({ name: d.raw_name, unit: d.unit_label, qty, price: a.unit_price, status: a.status });
     }
   }
   const groups = Array.from(groupMap.values()).sort((x, y) => y.subtotal - x.subtotal);
@@ -417,11 +428,43 @@ export default function SourcingDetailPage() {
           </div>
         </div>
 
+        {/* 거래처별 주문서 · 정산 — 거래처 가서 그대로 보고 주문 */}
+        {groups.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <Truck className="w-4 h-4 text-gray-500" />
+              <h2 className="text-sm font-bold text-gray-900">거래처별 주문서</h2>
+              <span className="text-xs text-gray-400">거래처마다 이 목록대로 주문하고, 출고확인서로 마감하세요</span>
+              <span className="ml-auto text-sm text-gray-900 font-bold">총 매입원가 {won(jobItems + jobShip)}</span>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {groups.map((g) => (
+                <VendorOrderCard
+                  key={g.key}
+                  group={g}
+                  settlement={settlementOf(g)}
+                  autoFee={autoShip(g)}
+                  onSaveShip={(fee) => upsertSettlement(g, { shipping_fee: fee })}
+                  onToggleSettled={(v) => upsertSettlement(g, { settled: v, shipping_fee: shipOf(g) })}
+                  onReconcile={() => setReconcileFor(g)}
+                />
+              ))}
+            </div>
+            <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap items-center justify-end gap-x-6 gap-y-1 text-sm">
+              <span className="text-gray-500">물품비 <b className="text-gray-900">{won(jobItems)}</b></span>
+              <span className="text-gray-500">배송비 <b className="text-gray-900">{won(jobShip)}</b></span>
+              <span className="text-gray-900 font-bold">합계 {won(jobItems + jobShip)}</span>
+            </div>
+          </div>
+        )}
+
+        <p className="text-xs font-medium text-gray-500 pt-1">품목별 매칭·거래처 분류</p>
         <div className="space-y-3">
           {job.demand_lines.map((d) => {
             const secured = d.sourcing_allocations.reduce((a, x) => a + securedOf(x), 0);
             const ordered = d.sourcing_allocations.reduce((a, x) => a + x.order_qty, 0);
             const shortfall = Math.max(0, d.required_qty - secured);
+            const orderShort = Math.max(0, d.required_qty - ordered);
             const pct = d.required_qty > 0 ? Math.min(100, Math.round((secured / d.required_qty) * 100)) : 0;
             return (
               <div key={d.id} className="bg-white rounded-xl border border-gray-200 p-4">
@@ -435,13 +478,17 @@ export default function SourcingDetailPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {shortfall > 0 ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-                        <AlertTriangle className="w-3 h-3" /> 부족 {shortfall} · 재소싱 필요
-                      </span>
-                    ) : (
+                    {shortfall === 0 ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
                         <CheckCircle2 className="w-3 h-3" /> 확보완료
+                      </span>
+                    ) : orderShort === 0 ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                        <Truck className="w-3 h-3" /> 발주완료 · 출고대기
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                        <AlertTriangle className="w-3 h-3" /> 미발주 {orderShort} · 거래처 분류 필요
                       </span>
                     )}
                     <button onClick={() => deleteDemand(d.id)} className="p-1 text-gray-300 hover:text-red-500" title="품목 삭제">
@@ -471,35 +518,6 @@ export default function SourcingDetailPage() {
             );
           })}
         </div>
-
-        {/* 거래처별 정산 */}
-        {groups.length > 0 && (
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Truck className="w-4 h-4 text-gray-500" />
-              <h2 className="text-sm font-bold text-gray-900">거래처별 정산</h2>
-              <span className="text-xs text-gray-400">물품비 + 배송비 = 매입원가</span>
-            </div>
-            <div className="space-y-2">
-              {groups.map((g) => (
-                <SettlementRow
-                  key={g.key}
-                  group={g}
-                  settlement={settlementOf(g)}
-                  autoFee={autoShip(g)}
-                  onSaveShip={(fee) => upsertSettlement(g, { shipping_fee: fee })}
-                  onToggleSettled={(v) => upsertSettlement(g, { settled: v, shipping_fee: shipOf(g) })}
-                  onReconcile={() => setReconcileFor(g)}
-                />
-              ))}
-            </div>
-            <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap items-center justify-end gap-x-6 gap-y-1 text-sm">
-              <span className="text-gray-500">물품비 <b className="text-gray-900">{won(jobItems)}</b></span>
-              <span className="text-gray-500">배송비 <b className="text-gray-900">{won(jobShip)}</b></span>
-              <span className="text-gray-900 font-bold">총 매입원가 {won(jobItems + jobShip)}</span>
-            </div>
-          </div>
-        )}
 
         {/* 품목 추가 */}
         <div className="bg-white rounded-xl border border-dashed border-gray-300 p-4">
@@ -709,7 +727,7 @@ function AllocTable({
   );
 }
 
-function SettlementRow({
+function VendorOrderCard({
   group,
   settlement,
   autoFee,
@@ -724,59 +742,103 @@ function SettlementRow({
   onToggleSettled: (v: boolean) => void;
   onReconcile: () => void;
 }) {
+  const toast = useToast();
   const effectiveFee = settlement ? settlement.shipping_fee : autoFee;
   const [fee, setFee] = useState(String(effectiveFee));
   useEffect(() => {
     setFee(String(effectiveFee));
   }, [effectiveFee]);
   const isLater = group.policy === "later";
+  const settled = settlement?.settled ?? false;
+  const orderItems = group.items.filter((it) => it.qty > 0);
   const total = group.subtotal + (Number(fee) || 0);
   const commit = () => {
     const v = Number(fee) || 0;
     if (v !== effectiveFee) onSaveShip(v);
   };
+  const copyOrder = async () => {
+    const text = orderItems.map((it) => `${it.name} ${it.qty}${it.unit ?? ""}`).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${group.name} 주문 ${orderItems.length}건 복사됨`);
+    } catch {
+      toast.error("복사 실패 — 직접 선택해 복사하세요.");
+    }
+  };
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-gray-50 px-3 py-2.5 text-sm">
-      <span className="font-medium text-gray-900 min-w-[100px]">{group.name}</span>
-      <span
-        className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-          isLater ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
-        }`}
-        title={isLater ? "후책정: 정산 때 배송비를 직접 입력" : "규칙형: 무료기준 이상이면 0, 아니면 정액 자동"}
-      >
-        {isLater ? "후책정" : "자동"}
-      </span>
-      <span className="text-gray-500">물품 {won(group.subtotal)}</span>
-      <div className="flex items-center gap-1 ml-auto">
-        <span className="text-xs text-gray-400">배송비</span>
-        <input
-          type="number"
-          min={0}
-          value={fee}
-          onChange={(e) => setFee(e.target.value)}
-          onBlur={commit}
-          className="w-24 px-2 py-1 border border-gray-200 rounded-md text-sm text-right"
-        />
-        {!isLater && !settlement && autoFee === 0 && group.freeMin > 0 && (
-          <span className="text-[10px] text-emerald-600">무료</span>
-        )}
+    <div className={`rounded-lg border ${settled ? "border-emerald-200 bg-emerald-50/40" : "border-gray-200"}`}>
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-gray-100">
+        <span className="font-bold text-gray-900">{group.name}</span>
+        <span
+          className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+            isLater ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
+          }`}
+          title={isLater ? "후책정: 주문량 보고 거래처가 배송비를 책정 → 직접 입력" : "규칙형: 무료기준 이상이면 0, 아니면 정액 자동"}
+        >
+          {isLater ? "후책정" : "자동"}
+        </span>
+        <span className="text-xs text-gray-400">{orderItems.length}품목</span>
+        {settled && <span className="text-[10px] text-emerald-700 font-medium">마감됨</span>}
+        <button
+          onClick={copyOrder}
+          className="ml-auto flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-md text-xs text-gray-700 hover:bg-gray-50"
+          title="이 거래처 주문 목록을 복사 — 사이트·카톡에 붙여넣기"
+        >
+          <Copy className="w-3.5 h-3.5" /> 복사
+        </button>
       </div>
-      <span className="font-bold text-gray-900 min-w-[90px] text-right">{won(total)}</span>
-      <button
-        onClick={onReconcile}
-        className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-md text-xs text-gray-700 hover:bg-white"
-        title="출고확인서/명세서를 올려 실제 출고수량·단가·배송비를 반영"
-      >
-        <Upload className="w-3.5 h-3.5" /> 출고확인서
-      </button>
-      <label className="flex items-center gap-1 text-xs text-gray-500 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={settlement?.settled ?? false}
-          onChange={(e) => onToggleSettled(e.target.checked)}
-        />
-        마감
-      </label>
+
+      <table className="w-full text-sm">
+        <tbody>
+          {orderItems.map((it, i) => (
+            <tr key={i} className="border-b border-gray-50 last:border-0">
+              <td className="px-3 py-1.5 text-gray-900">{it.name}</td>
+              <td className="px-2 py-1.5 text-right text-gray-700 whitespace-nowrap">
+                {it.qty}
+                {it.unit ?? ""}
+              </td>
+              <td className="px-2 py-1.5 text-right text-gray-400 whitespace-nowrap">
+                {it.price != null ? `@${it.price.toLocaleString()}` : "-"}
+              </td>
+              <td className="px-3 py-1.5 text-right text-gray-700 whitespace-nowrap">
+                {it.price != null ? won(it.qty * it.price) : "-"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 border-t border-gray-100 text-sm">
+        <span className="text-gray-500">물품 {won(group.subtotal)}</span>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-gray-400">배송비</span>
+          <input
+            type="number"
+            min={0}
+            value={fee}
+            onChange={(e) => setFee(e.target.value)}
+            onBlur={commit}
+            className="w-20 px-2 py-1 border border-gray-200 rounded-md text-sm text-right"
+          />
+          {!isLater && !settlement && autoFee === 0 && group.freeMin > 0 && (
+            <span className="text-[10px] text-emerald-600">무료</span>
+          )}
+        </div>
+        <span className="font-bold text-gray-900">합계 {won(total)}</span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={onReconcile}
+            className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-md text-xs text-gray-700 hover:bg-gray-50"
+            title="출고확인서/명세서를 올려 실제 출고수량·단가·배송비를 반영"
+          >
+            <Upload className="w-3.5 h-3.5" /> 출고확인서
+          </button>
+          <label className="flex items-center gap-1 text-xs text-gray-500 cursor-pointer">
+            <input type="checkbox" checked={settled} onChange={(e) => onToggleSettled(e.target.checked)} />
+            마감
+          </label>
+        </div>
+      </div>
     </div>
   );
 }
