@@ -94,7 +94,7 @@ export default function ProductsPage() {
 
   return (
     <>
-      <TopBar title="품목 마스터" subtitle={`총 ${totalCount.toLocaleString()}개 품목 등록`} />
+      <TopBar title="제품" subtitle={`총 ${totalCount.toLocaleString()}개`} />
       <div className="flex-1 p-4 md:p-6 space-y-4 overflow-auto">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
           <div className="relative w-full sm:w-auto">

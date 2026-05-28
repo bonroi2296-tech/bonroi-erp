@@ -87,10 +87,14 @@ interface VendorGroup {
 }
 interface ReconcileRow {
   demand_line_id: string | null;
+  product_id: string | null;
   matched_name: string | null;
   doc_name: string;
   qty: number;
   unit_price: number | null;
+  edi_code: string | null;
+  pack_size: number | null;
+  pack_unit: string | null;
 }
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -536,6 +540,35 @@ export default function SourcingDetailPage() {
       }
       // 출고확인서 반영 = 이 거래처 완료 → 주문 내역(orders/order_items)에 누적
       await writeVendorOrder(g, true, shippingFee);
+
+      // 명세서에서 EDI/박스 정보가 잡혔으면 품목마스터의 빈 칸만 자동 채움(덮어쓰지 않음)
+      const enriched = rows.filter((r) => r.product_id && (r.edi_code || r.pack_size != null || r.pack_unit));
+      if (enriched.length) {
+        const productIds = Array.from(new Set(enriched.map((r) => r.product_id!).filter((x): x is string => !!x)));
+        const { data: existing } = await supabase
+          .from("products")
+          .select("id, edi_code, pack_size, pack_unit")
+          .in("id", productIds);
+        const byId = new Map(
+          ((existing as { id: string; edi_code: string | null; pack_size: number | null; pack_unit: string | null }[]) ?? [])
+            .map((p) => [p.id, p] as const)
+        );
+        let filled = 0;
+        for (const r of enriched) {
+          const cur = byId.get(r.product_id!);
+          if (!cur) continue;
+          const patch: TablesUpdate<"products"> = {};
+          if (!cur.edi_code && r.edi_code) patch.edi_code = r.edi_code;
+          if (cur.pack_size == null && r.pack_size != null) patch.pack_size = r.pack_size;
+          if (!cur.pack_unit && r.pack_unit) patch.pack_unit = r.pack_unit;
+          if (Object.keys(patch).length > 0) {
+            await supabase.from("products").update(patch).eq("id", r.product_id!);
+            filled++;
+          }
+        }
+        if (filled > 0) toast.info(`품목마스터 ${filled}건 자동 보완(EDI·박스수량).`);
+      }
+
       toast.success("출고확인서를 반영하고 주문 내역에 올렸습니다.");
       setReconcileFor(null);
       fetchJob();

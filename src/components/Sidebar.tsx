@@ -19,7 +19,7 @@ const navItems: NavItem[] = [
   { href: "/orders", icon: ShoppingCart, label: "주문 관리" },
   { href: "/sourcing", icon: PackageSearch, label: "확보 관리" },
   { href: "/order-history", icon: ClipboardList, label: "주문 내역" },
-  { href: "/products", icon: Package, label: "품목 마스터" },
+  { href: "/products", icon: Package, label: "제품" },
   { href: "/price-compare", icon: TrendingDown, label: "단가 비교" },
   { href: "/vendors", icon: Truck, label: "벤더 관리" },
   { href: "/supply-monitor", icon: ShieldAlert, label: "공급망 관리" },
