@@ -499,9 +499,13 @@ export type Database = {
         Row: {
           category: string | null
           created_at: string | null
+          description: string | null
           edi_code: string | null
           id: string
+          image_url: string | null
           name: string
+          pack_size: number | null
+          pack_unit: string | null
           product_spec: string | null
           spec: string | null
           supply_price: number | null
@@ -509,9 +513,13 @@ export type Database = {
         Insert: {
           category?: string | null
           created_at?: string | null
+          description?: string | null
           edi_code?: string | null
           id?: string
+          image_url?: string | null
           name: string
+          pack_size?: number | null
+          pack_unit?: string | null
           product_spec?: string | null
           spec?: string | null
           supply_price?: number | null
@@ -519,9 +527,13 @@ export type Database = {
         Update: {
           category?: string | null
           created_at?: string | null
+          description?: string | null
           edi_code?: string | null
           id?: string
+          image_url?: string | null
           name?: string
+          pack_size?: number | null
+          pack_unit?: string | null
           product_spec?: string | null
           spec?: string | null
           supply_price?: number | null
