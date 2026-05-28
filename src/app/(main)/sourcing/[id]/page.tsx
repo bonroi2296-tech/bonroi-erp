@@ -7,7 +7,7 @@ import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/Toast";
 import type { TablesUpdate } from "@/lib/database.types";
-import { ArrowLeft, Plus, Trash2, AlertTriangle, CheckCircle2, Truck, Upload, X, Sparkles, Copy } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, AlertTriangle, CheckCircle2, Truck, Upload, X, Sparkles, Copy, ChevronDown, ChevronUp } from "lucide-react";
 
 interface Alloc {
   id: string;
@@ -598,6 +598,7 @@ function AllocTable({
   onShipped: (a: Alloc, qty: number) => void;
   onDelete: (allocId: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const [vendorSel, setVendorSel] = useState("");
   const [vendorText, setVendorText] = useState("");
   const [qty, setQty] = useState("");
@@ -618,6 +619,7 @@ function AllocTable({
     setVendorText("");
     setQty("");
     setPrice("");
+    setOpen(false);
   };
 
   return (
@@ -658,7 +660,18 @@ function AllocTable({
         </div>
       )}
 
-      {options.length > 0 && (
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800"
+      >
+        {allocs.length > 0 ? "거래처 바꾸기 · 추가" : "거래처 고르기"}
+        {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+      </button>
+
+      {open && (
+        <>
+          {options.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 pt-1">
           <span className="text-xs text-gray-400">추천:</span>
           {options.map((o) => (
@@ -731,6 +744,8 @@ function AllocTable({
           <Plus className="w-3.5 h-3.5" /> 거래처 추가
         </button>
       </div>
+        </>
+      )}
     </div>
   );
 }
