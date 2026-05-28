@@ -11,7 +11,8 @@ export const runtime = "nodejs";
 //
 // 응답: { ok: true, items: [...] } 또는 { ok: false, error: "..." }
 
-const DEFAULT_URL = "http://apis.data.go.kr/1471000/MdeqUdiEdiInfoService01/getMdeqUdiEdiInfoInq01";
+// data.go.kr 데이터 ID 15138675(의료기기 UDI/EDI 정보 조회 서비스) — Swagger anchor 의 operation 이름 단서.
+const DEFAULT_URL = "http://apis.data.go.kr/1471000/MdvUdiInfoService/getMdvUdiInfo";
 
 type AnyObj = Record<string, unknown>;
 
