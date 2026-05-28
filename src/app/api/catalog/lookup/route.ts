@@ -24,10 +24,15 @@ function pick(o: AnyObj, ...keys: string[]): string | null {
   return null;
 }
 
-// 공공데이터포털 키는 보통 디코딩 키(원본)인데, 사용자가 인코딩 키(예: %2B, %3D 포함)를 줄 수도 있다.
-// 둘 다 안전하게 처리: 이미 % 인코딩이 들어 있으면 그대로, 아니면 URL 인코딩한다.
+// 공공데이터포털 키 표준화 — 인코딩 키든 디코딩 키든 "디코딩 형태(원본)"로 통일.
+// 이후 URLSearchParams 가 알아서 한 번만 인코딩하므로 %252B 같은 이중 인코딩을 방지.
 function serviceKey(raw: string): string {
-  return /%[0-9A-Fa-f]{2}/.test(raw) ? raw : encodeURIComponent(raw);
+  if (!/%[0-9A-Fa-f]{2}/.test(raw)) return raw;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
 }
 
 export async function GET(request: Request) {
