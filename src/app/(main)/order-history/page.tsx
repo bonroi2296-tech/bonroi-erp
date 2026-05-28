@@ -26,32 +26,45 @@ interface Branch {
   short_name: string;
 }
 
-// 지점·거래처 가시성: 이름별로 고정 색을 부여(같은 이름 → 항상 같은 색)
-const CHIP_PALETTE = [
-  "bg-blue-100 text-blue-700",
-  "bg-purple-100 text-purple-700",
-  "bg-orange-100 text-orange-700",
-  "bg-emerald-100 text-emerald-700",
-  "bg-rose-100 text-rose-700",
-  "bg-amber-100 text-amber-700",
-  "bg-cyan-100 text-cyan-700",
-  "bg-indigo-100 text-indigo-700",
-  "bg-teal-100 text-teal-700",
-  "bg-pink-100 text-pink-700",
-  "bg-lime-100 text-lime-700",
-  "bg-violet-100 text-violet-700",
-];
-// 알려진 지점은 색 고정(구글시트 느낌), 그 외/거래처는 이름 해시로 색 배정
+// 지점·거래처 색은 영역 분리 → 같은 행에 같은 색이 두 번 안 뜨게.
+// 진한 톤(-200/-900)로 가시성 확보. 같은 이름은 항상 같은 색.
 const BRANCH_COLORS: Record<string, string> = {
-  강서: "bg-blue-100 text-blue-700",
-  광명: "bg-purple-100 text-purple-700",
-  성동: "bg-orange-100 text-orange-700",
-  신촌: "bg-emerald-100 text-emerald-700",
+  강서: "bg-sky-200 text-sky-900",
+  광명: "bg-violet-200 text-violet-900",
+  성동: "bg-orange-200 text-orange-900",
+  신촌: "bg-emerald-200 text-emerald-900",
 };
+// 거래처별 고정 색(자주 쓰는 11곳). 빈도 높을수록 더 튀는 색.
+const VENDOR_COLORS: Record<string, string> = {
+  주사기닷컴: "bg-red-200 text-red-900",
+  한백상사: "bg-blue-200 text-blue-900",
+  SD바이오: "bg-fuchsia-200 text-fuchsia-900",
+  디에치몰: "bg-amber-200 text-amber-900",
+  케이엠몰: "bg-teal-200 text-teal-900",
+  메디오션: "bg-pink-200 text-pink-900",
+  허브원: "bg-lime-200 text-lime-900",
+  디에이치몰: "bg-indigo-200 text-indigo-900",
+  수진메디칼: "bg-rose-200 text-rose-900",
+  안진도매로: "bg-cyan-200 text-cyan-900",
+  기타: "bg-gray-200 text-gray-800",
+};
+// 미등록 이름 폴백 — 위 두 맵 색과 겹치지 않도록 잔여 톤만
+const FALLBACK_PALETTE = [
+  "bg-red-200 text-red-900",
+  "bg-amber-200 text-amber-900",
+  "bg-lime-200 text-lime-900",
+  "bg-teal-200 text-teal-900",
+  "bg-cyan-200 text-cyan-900",
+  "bg-blue-200 text-blue-900",
+  "bg-indigo-200 text-indigo-900",
+  "bg-fuchsia-200 text-fuchsia-900",
+  "bg-pink-200 text-pink-900",
+  "bg-rose-200 text-rose-900",
+];
 function chipColor(key: string): string {
   let h = 0;
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
-  return CHIP_PALETTE[h % CHIP_PALETTE.length];
+  return FALLBACK_PALETTE[h % FALLBACK_PALETTE.length];
 }
 
 export default function OrderHistoryPage() {
@@ -463,7 +476,7 @@ export default function OrderHistoryPage() {
                       </td>
                       <td className="px-2 py-1 whitespace-nowrap">
                         {r.vendor_name && (
-                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${chipColor(r.vendor_name)}`}>
+                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${VENDOR_COLORS[r.vendor_name] ?? chipColor(r.vendor_name)}`}>
                             {r.vendor_name}
                           </span>
                         )}
