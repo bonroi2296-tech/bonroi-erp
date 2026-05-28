@@ -26,6 +26,34 @@ interface Branch {
   short_name: string;
 }
 
+// 지점·거래처 가시성: 이름별로 고정 색을 부여(같은 이름 → 항상 같은 색)
+const CHIP_PALETTE = [
+  "bg-blue-100 text-blue-700",
+  "bg-purple-100 text-purple-700",
+  "bg-orange-100 text-orange-700",
+  "bg-emerald-100 text-emerald-700",
+  "bg-rose-100 text-rose-700",
+  "bg-amber-100 text-amber-700",
+  "bg-cyan-100 text-cyan-700",
+  "bg-indigo-100 text-indigo-700",
+  "bg-teal-100 text-teal-700",
+  "bg-pink-100 text-pink-700",
+  "bg-lime-100 text-lime-700",
+  "bg-violet-100 text-violet-700",
+];
+// 알려진 지점은 색 고정(구글시트 느낌), 그 외/거래처는 이름 해시로 색 배정
+const BRANCH_COLORS: Record<string, string> = {
+  강서: "bg-blue-100 text-blue-700",
+  광명: "bg-purple-100 text-purple-700",
+  성동: "bg-orange-100 text-orange-700",
+  신촌: "bg-emerald-100 text-emerald-700",
+};
+function chipColor(key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return CHIP_PALETTE[h % CHIP_PALETTE.length];
+}
+
 export default function OrderHistoryPage() {
   const [rows, setRows] = useState<OrderHistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -381,82 +409,80 @@ export default function OrderHistoryPage() {
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-[11px] text-gray-500 uppercase">
                     <th
-                      className="text-left px-3 py-2.5 cursor-pointer hover:text-gray-700 whitespace-nowrap"
+                      className="text-left px-3 py-2 cursor-pointer hover:text-gray-700 whitespace-nowrap"
                       onClick={() => toggleSort("order_date")}
                     >
                       날짜 <SortIcon field="order_date" />
                     </th>
                     <th
-                      className="text-left px-2 py-2.5 cursor-pointer hover:text-gray-700 whitespace-nowrap"
+                      className="text-left px-2 py-2 cursor-pointer hover:text-gray-700 whitespace-nowrap"
                       onClick={() => toggleSort("branch_short")}
                     >
                       지점 <SortIcon field="branch_short" />
                     </th>
                     <th
-                      className="text-left px-2 py-2.5 cursor-pointer hover:text-gray-700 whitespace-nowrap"
+                      className="text-left px-2 py-2 cursor-pointer hover:text-gray-700 whitespace-nowrap"
                       onClick={() => toggleSort("vendor_name")}
                     >
                       거래처 <SortIcon field="vendor_name" />
                     </th>
                     <th
-                      className="text-left px-2 py-2.5 cursor-pointer hover:text-gray-700 whitespace-nowrap min-w-[200px]"
+                      className="text-left px-2 py-2 cursor-pointer hover:text-gray-700 whitespace-nowrap min-w-[200px]"
                       onClick={() => toggleSort("raw_product_name")}
                     >
                       제품(규격) <SortIcon field="raw_product_name" />
                     </th>
                     <th
-                      className="text-right px-2 py-2.5 cursor-pointer hover:text-gray-700 whitespace-nowrap"
+                      className="text-right px-2 py-2 cursor-pointer hover:text-gray-700 whitespace-nowrap"
                       onClick={() => toggleSort("quantity")}
                     >
                       수량 <SortIcon field="quantity" />
                     </th>
-                    <th className="text-right px-2 py-2.5 whitespace-nowrap">매입가</th>
-                    <th className="text-right px-2 py-2.5 whitespace-nowrap">총매입가</th>
-                    <th className="text-right px-2 py-2.5 whitespace-nowrap">납품가</th>
-                    <th className="text-right px-2 py-2.5 whitespace-nowrap">총납품가</th>
+                    <th className="text-right px-2 py-2 whitespace-nowrap">매입가</th>
+                    <th className="text-right px-2 py-2 whitespace-nowrap">총매입가</th>
+                    <th className="text-right px-2 py-2 whitespace-nowrap">납품가</th>
+                    <th className="text-right px-2 py-2 whitespace-nowrap">총납품가</th>
                     <th
-                      className="text-right px-2 py-2.5 cursor-pointer hover:text-gray-700 whitespace-nowrap"
+                      className="text-right px-2 py-2 cursor-pointer hover:text-gray-700 whitespace-nowrap"
                       onClick={() => toggleSort("margin")}
                     >
                       마진 <SortIcon field="margin" />
                     </th>
-                    <th className="text-right px-2 py-2.5 whitespace-nowrap">마진율</th>
-                    <th className="text-left px-2 py-2.5 whitespace-nowrap">EDI</th>
+                    <th className="text-right px-2 py-2 whitespace-nowrap">마진율</th>
+                    <th className="text-left px-2 py-2 whitespace-nowrap">EDI</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {filteredRows.map((r) => (
-                    <tr key={r.id} className="hover:bg-blue-50/30 transition-colors">
-                      <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{formatDate(r.order_date)}</td>
-                      <td className="px-2 py-2 whitespace-nowrap">
-                        <span
-                          className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-medium ${
-                            r.branch_short === "강서"
-                              ? "bg-blue-100 text-blue-700"
-                              : r.branch_short === "광명"
-                              ? "bg-purple-100 text-purple-700"
-                              : "bg-orange-100 text-orange-700"
-                          }`}
-                        >
+                    <tr key={r.id} className="hover:bg-blue-50/40 transition-colors">
+                      <td className="px-2.5 py-1 text-gray-600 whitespace-nowrap text-xs">{formatDate(r.order_date)}</td>
+                      <td className="px-2 py-1 whitespace-nowrap">
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${BRANCH_COLORS[r.branch_short] ?? chipColor(r.branch_short)}`}>
                           {r.branch_short}
                         </span>
                       </td>
-                      <td className="px-2 py-2 text-gray-600 whitespace-nowrap text-xs">{r.vendor_name}</td>
-                      <td className="px-2 py-2 text-gray-900 font-medium max-w-[280px] truncate">{r.raw_product_name}</td>
-                      <td className="px-2 py-2 text-right text-gray-700">{r.quantity}</td>
-                      <td className="px-2 py-2 text-right text-gray-600 text-xs">{formatPrice(r.purchase_price)}</td>
-                      <td className="px-2 py-2 text-right text-gray-700">{formatPrice(r.total_purchase)}</td>
-                      <td className="px-2 py-2 text-right text-gray-600 text-xs">{formatPrice(r.supply_price)}</td>
-                      <td className="px-2 py-2 text-right text-gray-700">{formatPrice(r.total_supply)}</td>
+                      <td className="px-2 py-1 whitespace-nowrap">
+                        {r.vendor_name && (
+                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${chipColor(r.vendor_name)}`}>
+                            {r.vendor_name}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1 text-gray-900 font-medium max-w-[280px] truncate text-xs">{r.raw_product_name}</td>
+                      <td className="px-2 py-1 text-right text-gray-700 text-xs">{r.quantity}</td>
+                      <td className="px-2 py-1 text-right text-gray-500 text-xs">{formatPrice(r.purchase_price)}</td>
+                      <td className="px-2 py-1 text-right text-gray-700 text-xs">{formatPrice(r.total_purchase)}</td>
+                      <td className="px-2 py-1 text-right text-gray-500 text-xs">{formatPrice(r.supply_price)}</td>
+                      <td className="px-2 py-1 text-right text-gray-700 text-xs">{formatPrice(r.total_supply)}</td>
                       <td
-                        className={`px-2 py-2 text-right font-medium ${
+                        className={`px-2 py-1 text-right font-medium text-xs ${
                           r.margin > 0 ? "text-emerald-600" : r.margin < 0 ? "text-red-600" : "text-gray-400"
                         }`}
                       >
                         {formatPrice(r.margin)}
                       </td>
-                      <td className="px-2 py-2 text-right text-gray-500 text-xs">{marginRate(r)}</td>
-                      <td className="px-2 py-2 text-gray-400 text-xs">{r.edi_code}</td>
+                      <td className="px-2 py-1 text-right text-gray-500 text-xs">{marginRate(r)}</td>
+                      <td className="px-2 py-1 text-gray-400 text-[11px]">{r.edi_code}</td>
                     </tr>
                   ))}
                 </tbody>
