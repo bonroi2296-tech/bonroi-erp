@@ -16,7 +16,7 @@ type NavItem = { href: string; icon: LucideIcon; label: string; hidden?: boolean
 // 부활 시 hidden 만 떼면 됨.
 const navItems: NavItem[] = [
   { href: "/dashboard", icon: LayoutDashboard, label: "대시보드" },
-  { href: "/orders", icon: ShoppingCart, label: "주문 관리" },
+  { href: "/orders", icon: ShoppingCart, label: "주문(기존)" },
   { href: "/sourcing", icon: PackageSearch, label: "확보 관리" },
   { href: "/order-history", icon: ClipboardList, label: "주문 내역" },
   { href: "/products", icon: Package, label: "제품" },

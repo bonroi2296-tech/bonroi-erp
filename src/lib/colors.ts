@@ -13,7 +13,6 @@ export const VENDOR_COLORS: Record<string, string> = {
   주사기닷컴: "bg-red-200 text-red-900",
   한백상사: "bg-blue-200 text-blue-900",
   SD바이오: "bg-fuchsia-200 text-fuchsia-900",
-  디에치몰: "bg-amber-200 text-amber-900",
   디에이치몰: "bg-indigo-200 text-indigo-900",
   케이엠몰: "bg-teal-200 text-teal-900",
   메디오션: "bg-pink-200 text-pink-900",

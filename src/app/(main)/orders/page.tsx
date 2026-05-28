@@ -452,8 +452,13 @@ export default function OrdersPage() {
 
   return (
     <>
-      <TopBar title="주문 관리" subtitle="병원별 주문 내역 조회 및 관리" />
+      <TopBar title="주문(기존)" subtitle="기존 주문 조회·수정 전용 화면" />
       <div className="flex-1 p-4 md:p-6 space-y-4 overflow-auto">
+        {/* 일원화 안내 배너 */}
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-900">
+          <span className="font-semibold">안내</span> · 신규 주문은 이제 <a href="/sourcing" className="font-semibold underline">확보 관리</a>에서 시작하세요. 이 화면은 <b>기존 주문 조회·수정 전용</b>입니다(데이터는 그대로 보존).
+        </div>
+
         {/* 상단 요약 */}
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-white rounded-xl border border-gray-200 p-3 md:p-4 text-center">
@@ -483,12 +488,15 @@ export default function OrdersPage() {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          <button
-            onClick={openModal}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 w-full sm:w-auto justify-center"
-          >
-            <Plus className="w-4 h-4" /> 새 주문
-          </button>
+          {/* 일원화 2단계: 신규 주문 등록 버튼 숨김(코드·로직은 보존). 부활은 false→true 로. */}
+          {false && (
+            <button
+              onClick={openModal}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 w-full sm:w-auto justify-center"
+            >
+              <Plus className="w-4 h-4" /> 새 주문
+            </button>
+          )}
         </div>
 
         {/* 주문 목록 — 그룹핑 */}
