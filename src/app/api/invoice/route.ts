@@ -82,13 +82,8 @@ export async function GET(request: NextRequest) {
 
   const supabase = createSupabaseServerClient();
 
-  // 인증 확인 — 로그인하지 않은 요청 차단
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
-  }
+  // 현재 앱은 비로그인(anon)으로 운영하므로 인증 게이트는 두지 않는다.
+  // 로그인 도입(PROJECT_CONTEXT 결정#1) 시 여기서 user 확인을 복구할 것.
 
   const [year, mon] = month.split("-").map(Number);
   const startDate = `${year}-${String(mon).padStart(2, "0")}-01`;

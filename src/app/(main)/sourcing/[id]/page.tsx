@@ -329,13 +329,13 @@ export default function SourcingDetailPage() {
       const { data: dls } = await supabase
         .from("demand_lines")
         .select(
-          "id, raw_name, product_id, product:products(name, spec, category), sourcing_allocations(id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty)"
+          "id, raw_name, product_id, product:products(name, spec, category, supply_price), sourcing_allocations(id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty)"
         )
         .eq("job_id", id);
       type DRow = {
         raw_name: string;
         product_id: string | null;
-        product: { name: string; spec: string | null; category: string | null } | null;
+        product: { name: string; spec: string | null; category: string | null; supply_price: number | null } | null;
         sourcing_allocations: Alloc[];
       };
       const lineItems: TablesInsert<"order_items">[] = [];
@@ -349,6 +349,7 @@ export default function SourcingDetailPage() {
           if (d.product?.category) category = d.product.category;
           const label = d.product ? `${d.product.name}${d.product.spec ? ` ${d.product.spec}` : ""}` : d.raw_name;
           const price = a.unit_price ?? 0;
+          const supply = d.product?.supply_price ?? 0; // 납품가(병원가)는 품목마스터 기준
           lineItems.push({
             order_id: "",
             product_id: d.product_id,
@@ -357,14 +358,30 @@ export default function SourcingDetailPage() {
             quantity: qty,
             purchase_price: price,
             total_purchase: qty * price,
-            supply_price: 0,
-            total_supply: 0,
-            margin: 0,
+            supply_price: supply,
+            total_supply: qty * supply,
+            margin: (supply - price) * qty,
           });
         }
       }
-      const itemsTotal = lineItems.reduce((s, it) => s + (it.total_purchase ?? 0), 0);
-      if (lineItems.length > 0 || fee > 0) {
+      // 배송비는 매입만 있고 납품가 0 → 마진 -배송비 (주문 관리와 동일 규칙)
+      if (fee > 0) {
+        lineItems.push({
+          order_id: "",
+          product_id: null,
+          vendor_id: g.vendor_id,
+          raw_product_name: "배송비",
+          quantity: 1,
+          purchase_price: fee,
+          total_purchase: fee,
+          supply_price: 0,
+          total_supply: 0,
+          margin: -fee,
+        });
+      }
+      if (lineItems.length > 0) {
+        const totalPurchase = lineItems.reduce((s, it) => s + (it.total_purchase ?? 0), 0);
+        const totalSupply = lineItems.reduce((s, it) => s + (it.total_supply ?? 0), 0);
         const { data: ord, error: oErr } = await supabase
           .from("orders")
           .insert({
@@ -374,29 +391,15 @@ export default function SourcingDetailPage() {
             status: "완료",
             category,
             vendor_name: g.name,
-            total_purchase_amount: itemsTotal + fee,
-            total_supply_amount: 0,
-            total_margin: 0,
+            total_purchase_amount: totalPurchase,
+            total_supply_amount: totalSupply,
+            total_margin: totalSupply - totalPurchase,
             note: `소싱 자동 반영${job?.title ? ` · ${job.title}` : ""}`,
           })
           .select("id")
           .single();
         if (oErr || !ord) throw oErr ?? new Error("주문 생성 실패");
         newOrderId = ord.id;
-        if (fee > 0) {
-          lineItems.push({
-            order_id: "",
-            product_id: null,
-            vendor_id: g.vendor_id,
-            raw_product_name: "배송비",
-            quantity: 1,
-            purchase_price: fee,
-            total_purchase: fee,
-            supply_price: 0,
-            total_supply: 0,
-            margin: 0,
-          });
-        }
         const { error: iErr } = await supabase
           .from("order_items")
           .insert(lineItems.map((it) => ({ ...it, order_id: newOrderId! })));
