@@ -776,6 +776,7 @@ export type Database = {
           id: string
           job_id: string
           note: string | null
+          order_id: string | null
           settled: boolean
           shipping_fee: number
           updated_at: string | null
@@ -788,6 +789,7 @@ export type Database = {
           id?: string
           job_id: string
           note?: string | null
+          order_id?: string | null
           settled?: boolean
           shipping_fee?: number
           updated_at?: string | null
@@ -800,6 +802,7 @@ export type Database = {
           id?: string
           job_id?: string
           note?: string | null
+          order_id?: string | null
           settled?: boolean
           shipping_fee?: number
           updated_at?: string | null
@@ -812,6 +815,13 @@ export type Database = {
             columns: ["job_id"]
             isOneToOne: false
             referencedRelation: "sourcing_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sourcing_settlements_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
             referencedColumns: ["id"]
           },
           {

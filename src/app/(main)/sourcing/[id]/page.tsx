@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/Toast";
-import type { TablesUpdate } from "@/lib/database.types";
+import type { TablesUpdate, TablesInsert } from "@/lib/database.types";
 import { ArrowLeft, Plus, Trash2, AlertTriangle, CheckCircle2, Truck, Upload, X, Sparkles, Copy, ChevronDown, ChevronUp } from "lucide-react";
 
 interface Alloc {
@@ -38,6 +38,8 @@ interface Job {
   requester: string | null;
   delivery_note: string | null;
   status: string;
+  branch_id: string | null;
+  created_at: string | null;
   branch: { name: string } | null;
   demand_lines: Demand[];
 }
@@ -60,6 +62,7 @@ interface Settlement {
   vendor_label: string | null;
   shipping_fee: number;
   settled: boolean;
+  order_id: string | null;
 }
 // 거래처별 정산 묶음(발주건 전체의 할당을 거래처로 모음)
 interface VendorItem {
@@ -136,7 +139,7 @@ export default function SourcingDetailPage() {
     const { data } = await supabase
       .from("sourcing_jobs")
       .select(
-        "id, title, requester, delivery_note, status, branch:branches(name), demand_lines(id, raw_name, product_id, product:products(name, spec), required_qty, unit_label, purpose, sort_order, sourcing_allocations(id, demand_line_id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty, note, vendor:vendors(name)))"
+        "id, title, requester, delivery_note, status, branch_id, created_at, branch:branches(name), demand_lines(id, raw_name, product_id, product:products(name, spec), required_qty, unit_label, purpose, sort_order, sourcing_allocations(id, demand_line_id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty, note, vendor:vendors(name)))"
       )
       .eq("id", id)
       .single();
@@ -147,7 +150,7 @@ export default function SourcingDetailPage() {
 
       supabase
         .from("sourcing_settlements")
-        .select("id, vendor_id, vendor_label, shipping_fee, settled")
+        .select("id, vendor_id, vendor_label, shipping_fee, settled, order_id")
         .eq("job_id", id)
         .then(({ data: stl }) => setSettlements((stl as Settlement[]) || []));
 
@@ -291,6 +294,146 @@ export default function SourcingDetailPage() {
     fetchJob();
   };
 
+  // 발주건의 "주문 날짜": 제목이 날짜면 그걸, 아니면 생성일, 그래도 없으면 오늘
+  const orderDateOf = (): string => {
+    const t = (job?.title ?? "").trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.slice(0, 10);
+    if (job?.created_at) return job.created_at.slice(0, 10);
+    return new Date().toISOString().slice(0, 10);
+  };
+  const nextOrderNumber = async (): Promise<string> => {
+    const { data, error } = await supabase.rpc("next_order_number");
+    if (!error && typeof data === "string") return data;
+    const { data: maxOrder } = await supabase
+      .from("orders")
+      .select("order_number")
+      .order("order_number", { ascending: false })
+      .limit(1);
+    let n = 0;
+    const m = maxOrder?.[0]?.order_number?.match(/ORD-\d{4}-(\d+)/);
+    if (m) n = parseInt(m[1]);
+    return `ORD-${new Date().getFullYear()}-${String(n + 1).padStart(4, "0")}`;
+  };
+
+  // 거래처 "완료" → 주문 내역(orders/order_items)에 반영, "완료 취소" → 제거.
+  // toast/refetch 없이 DB만 처리(applyReconcile 와 완료 버튼이 공유). 최신 할당을 다시 읽어 실제 수량으로 구성.
+  const writeVendorOrder = async (g: VendorGroup, complete: boolean, fee: number) => {
+    const existing = settlementOf(g);
+    // 이전에 생성한 주문이 있으면 먼저 제거(order_items 는 ON DELETE CASCADE)
+    if (existing?.order_id) {
+      await supabase.from("orders").delete().eq("id", existing.order_id);
+    }
+
+    let newOrderId: string | null = null;
+    if (complete) {
+      const { data: dls } = await supabase
+        .from("demand_lines")
+        .select(
+          "id, raw_name, product_id, product:products(name, spec, category), sourcing_allocations(id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty)"
+        )
+        .eq("job_id", id);
+      type DRow = {
+        raw_name: string;
+        product_id: string | null;
+        product: { name: string; spec: string | null; category: string | null } | null;
+        sourcing_allocations: Alloc[];
+      };
+      const lineItems: TablesInsert<"order_items">[] = [];
+      let category = "양방";
+      for (const d of ((dls as unknown as DRow[]) || [])) {
+        for (const a of d.sourcing_allocations || []) {
+          const inGroup = g.vendor_id ? a.vendor_id === g.vendor_id : a.vendor_label === g.vendor_label;
+          if (!inGroup) continue;
+          const qty = billedQty(a);
+          if (qty <= 0) continue;
+          if (d.product?.category) category = d.product.category;
+          const label = d.product ? `${d.product.name}${d.product.spec ? ` ${d.product.spec}` : ""}` : d.raw_name;
+          const price = a.unit_price ?? 0;
+          lineItems.push({
+            order_id: "",
+            product_id: d.product_id,
+            vendor_id: g.vendor_id,
+            raw_product_name: label,
+            quantity: qty,
+            purchase_price: price,
+            total_purchase: qty * price,
+            supply_price: 0,
+            total_supply: 0,
+            margin: 0,
+          });
+        }
+      }
+      const itemsTotal = lineItems.reduce((s, it) => s + (it.total_purchase ?? 0), 0);
+      if (lineItems.length > 0 || fee > 0) {
+        const { data: ord, error: oErr } = await supabase
+          .from("orders")
+          .insert({
+            order_number: await nextOrderNumber(),
+            branch_id: job?.branch_id ?? null,
+            order_date: orderDateOf(),
+            status: "완료",
+            category,
+            vendor_name: g.name,
+            total_purchase_amount: itemsTotal + fee,
+            total_supply_amount: 0,
+            total_margin: 0,
+            note: `소싱 자동 반영${job?.title ? ` · ${job.title}` : ""}`,
+          })
+          .select("id")
+          .single();
+        if (oErr || !ord) throw oErr ?? new Error("주문 생성 실패");
+        newOrderId = ord.id;
+        if (fee > 0) {
+          lineItems.push({
+            order_id: "",
+            product_id: null,
+            vendor_id: g.vendor_id,
+            raw_product_name: "배송비",
+            quantity: 1,
+            purchase_price: fee,
+            total_purchase: fee,
+            supply_price: 0,
+            total_supply: 0,
+            margin: 0,
+          });
+        }
+        const { error: iErr } = await supabase
+          .from("order_items")
+          .insert(lineItems.map((it) => ({ ...it, order_id: newOrderId! })));
+        if (iErr) throw iErr;
+      }
+    }
+
+    if (existing) {
+      const { error } = await supabase
+        .from("sourcing_settlements")
+        .update({ settled: complete, order_id: newOrderId, shipping_fee: fee, updated_at: new Date().toISOString() })
+        .eq("id", existing.id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from("sourcing_settlements").insert({
+        job_id: id,
+        vendor_id: g.vendor_id,
+        vendor_label: g.vendor_id ? null : g.vendor_label,
+        shipping_fee: fee,
+        settled: complete,
+        order_id: newOrderId,
+      });
+      if (error) throw error;
+    }
+  };
+
+  // 완료 버튼 핸들러(피드백 + 새로고침 포함)
+  const toggleComplete = async (g: VendorGroup, complete: boolean, fee: number) => {
+    try {
+      await writeVendorOrder(g, complete, fee);
+      toast.success(complete ? `${g.name} 완료 — 주문 내역에 올렸어요.` : `${g.name} 완료를 취소했어요.`);
+      fetchJob();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "처리 중 오류");
+    }
+  };
+
   // 출고확인서 분석 결과를 거래처별 할당에 반영(출고수량·단가·상태) + 배송비 정산
   const applyReconcile = async (g: VendorGroup, rows: ReconcileRow[], shippingFee: number) => {
     try {
@@ -325,21 +468,9 @@ export default function SourcingDetailPage() {
           if (error) throw error;
         }
       }
-      const existingS = settlementOf(g);
-      if (existingS) {
-        await supabase
-          .from("sourcing_settlements")
-          .update({ shipping_fee: shippingFee, updated_at: new Date().toISOString() })
-          .eq("id", existingS.id);
-      } else {
-        await supabase.from("sourcing_settlements").insert({
-          job_id: id,
-          vendor_id: g.vendor_id,
-          vendor_label: g.vendor_id ? null : g.vendor_label,
-          shipping_fee: shippingFee,
-        });
-      }
-      toast.success("출고확인서를 반영했습니다.");
+      // 출고확인서 반영 = 이 거래처 완료 → 주문 내역(orders/order_items)에 누적
+      await writeVendorOrder(g, true, shippingFee);
+      toast.success("출고확인서를 반영하고 주문 내역에 올렸습니다.");
       setReconcileFor(null);
       fetchJob();
     } catch (e) {
@@ -436,7 +567,7 @@ export default function SourcingDetailPage() {
             <div className="flex flex-wrap items-center gap-2 mb-3">
               <Truck className="w-4 h-4 text-gray-500" />
               <h2 className="text-sm font-bold text-gray-900">거래처별 주문서</h2>
-              <span className="text-xs text-gray-400">거래처마다 이 목록대로 주문하고, 출고확인서로 마감하세요</span>
+              <span className="text-xs text-gray-400">거래처마다 이 목록대로 주문하고, 출고확인서를 반영하면 완료 → 주문 내역에 쌓입니다</span>
               <span className="ml-auto text-sm text-gray-900 font-bold">총 매입원가 {won(jobItems + jobShip)}</span>
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -447,7 +578,7 @@ export default function SourcingDetailPage() {
                   settlement={settlementOf(g)}
                   autoFee={autoShip(g)}
                   onSaveShip={(fee) => upsertSettlement(g, { shipping_fee: fee })}
-                  onToggleSettled={(v) => upsertSettlement(g, { settled: v, shipping_fee: shipOf(g) })}
+                  onComplete={(v) => toggleComplete(g, v, shipOf(g))}
                   onReconcile={() => setReconcileFor(g)}
                 />
               ))}
@@ -755,14 +886,14 @@ function VendorOrderCard({
   settlement,
   autoFee,
   onSaveShip,
-  onToggleSettled,
+  onComplete,
   onReconcile,
 }: {
   group: VendorGroup;
   settlement: Settlement | undefined;
   autoFee: number;
   onSaveShip: (fee: number) => void;
-  onToggleSettled: (v: boolean) => void;
+  onComplete: (v: boolean) => void;
   onReconcile: () => void;
 }) {
   const toast = useToast();
@@ -772,7 +903,7 @@ function VendorOrderCard({
     setFee(String(effectiveFee));
   }, [effectiveFee]);
   const isLater = group.policy === "later";
-  const settled = settlement?.settled ?? false;
+  const done = settlement?.settled ?? false;
   const orderItems = group.items.filter((it) => it.qty > 0);
   const total = group.subtotal + (Number(fee) || 0);
   const commit = () => {
@@ -789,7 +920,7 @@ function VendorOrderCard({
     }
   };
   return (
-    <div className={`rounded-lg border ${settled ? "border-emerald-200 bg-emerald-50/40" : "border-gray-200"}`}>
+    <div className={`rounded-lg border ${done ? "border-emerald-200 bg-emerald-50/40" : "border-gray-200"}`}>
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-gray-100">
         <span className="font-bold text-gray-900">{group.name}</span>
         <span
@@ -801,7 +932,11 @@ function VendorOrderCard({
           {isLater ? "후책정" : "자동"}
         </span>
         <span className="text-xs text-gray-400">{orderItems.length}품목</span>
-        {settled && <span className="text-[10px] text-emerald-700 font-medium">마감됨</span>}
+        {done && (
+          <span className="inline-flex items-center gap-0.5 text-[10px] text-emerald-700 font-medium">
+            <CheckCircle2 className="w-3 h-3" /> 완료
+          </span>
+        )}
         <button
           onClick={copyOrder}
           className="ml-auto flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-md text-xs text-gray-700 hover:bg-gray-50"
@@ -852,14 +987,27 @@ function VendorOrderCard({
           <button
             onClick={onReconcile}
             className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-md text-xs text-gray-700 hover:bg-gray-50"
-            title="출고확인서/명세서를 올려 실제 출고수량·단가·배송비를 반영"
+            title="출고확인서/명세서를 올려 실제 출고수량·단가·배송비를 반영 → 완료 처리"
           >
             <Upload className="w-3.5 h-3.5" /> 출고확인서
           </button>
-          <label className="flex items-center gap-1 text-xs text-gray-500 cursor-pointer">
-            <input type="checkbox" checked={settled} onChange={(e) => onToggleSettled(e.target.checked)} />
-            마감
-          </label>
+          {done ? (
+            <button
+              onClick={() => onComplete(false)}
+              className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-md text-xs text-gray-500 hover:bg-gray-50"
+              title="완료를 취소하고 주문 내역에서 내립니다"
+            >
+              완료 취소
+            </button>
+          ) : (
+            <button
+              onClick={() => onComplete(true)}
+              className="flex items-center gap-1 px-3 py-1 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+              title="이 거래처 발주를 완료하고 주문 내역에 올립니다"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" /> 완료
+            </button>
+          )}
         </div>
       </div>
     </div>
