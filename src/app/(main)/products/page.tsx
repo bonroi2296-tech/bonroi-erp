@@ -436,10 +436,34 @@ function ProductInfoEditor({ product }: { product: Product }) {
   const [packSize, setPackSize] = useState(product.pack_size != null ? String(product.pack_size) : "");
   const [packUnit, setPackUnit] = useState(product.pack_unit ?? "");
   const [description, setDescription] = useState(product.description ?? "");
+  const [uploading, setUploading] = useState(false);
 
   const save = async (patch: { image_url?: string | null; pack_size?: number | null; pack_unit?: string | null; description?: string | null }) => {
     const { error } = await supabase.from("products").update(patch).eq("id", product.id);
     if (error) toast.error("저장 실패: " + error.message);
+  };
+
+  const uploadFile = async (file: File) => {
+    if (!file.type.startsWith("image/")) return toast.error("이미지 파일만 업로드할 수 있어요.");
+    if (file.size > 5 * 1024 * 1024) return toast.error("이미지가 너무 커요. 5MB 이하로 줄여주세요.");
+    setUploading(true);
+    try {
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `${product.id}/${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from("product-images")
+        .upload(path, file, { upsert: true, contentType: file.type });
+      if (upErr) throw upErr;
+      const { data } = supabase.storage.from("product-images").getPublicUrl(path);
+      const url = data.publicUrl;
+      setImageUrl(url);
+      await save({ image_url: url });
+      toast.success("사진 업로드 완료");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "업로드 실패");
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -456,15 +480,28 @@ function ProductInfoEditor({ product }: { product: Product }) {
         </div>
         <div className="flex-1 space-y-2">
           <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-500 w-20 flex-shrink-0">사진 URL</label>
+            <label className="text-xs text-gray-500 w-20 flex-shrink-0">사진</label>
             <input
               type="url"
               value={imageUrl}
               onChange={(e) => setImageUrl(e.target.value)}
               onBlur={() => save({ image_url: imageUrl.trim() || null })}
-              placeholder="https://..."
+              placeholder="URL 붙여넣기 또는 →"
               className="flex-1 min-w-0 px-2 py-1 border border-gray-200 rounded text-xs focus:ring-2 focus:ring-blue-500 outline-none"
             />
+            <label className={`flex items-center gap-1 px-2 py-1 border border-gray-200 rounded text-xs cursor-pointer hover:bg-gray-50 flex-shrink-0 ${uploading ? "opacity-50 pointer-events-none" : ""}`}>
+              {uploading ? "업로드 중…" : "파일 올리기"}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadFile(f);
+                  e.target.value = "";
+                }}
+              />
+            </label>
           </div>
           <div className="flex items-center gap-2">
             <label className="text-xs text-gray-500 w-20 flex-shrink-0">박스당 수량</label>
