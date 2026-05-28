@@ -60,18 +60,17 @@ export async function GET(request: Request) {
     type: "json",
     _type: "json",
   });
-  // 검색 키 — 공공 API마다 파라미터명이 다를 수 있어 흔한 표기를 다 보냄(API는 모르는 건 무시)
+  // 검색 키 — 응답 필드(UPPERCASE_UNDER) 기준 lowerCamel 이름.
   if (edi) {
+    params.set("careSalCdInptVal", edi); // CARE_SAL_CD_INPT_VAL (요양급여 EDI 코드)
     params.set("ediCd", edi);
-    params.set("ediCode", edi);
   }
   if (udi) {
-    params.set("udidiCd", udi);
-    params.set("udiDi", udi);
+    params.set("udidiCd", udi); // UDIDI_CD
   }
   if (name) {
-    params.set("prdlstNm", name);
-    params.set("prdtNm", name);
+    params.set("prdtNmCont", name); // PRDT_NM_CONT (제품명)
+    params.set("prdlstNm", name);   // PRDLST_NM (품목분류명)
   }
 
   const url = `${base}?${params.toString()}`;
@@ -106,15 +105,18 @@ export async function GET(request: Request) {
     [];
   const list: AnyObj[] = Array.isArray(itemsRaw) ? itemsRaw : itemsRaw ? [itemsRaw] : [];
 
+  // 식약처 응답 필드(대문자_언더스코어) 매핑.
+  // PRDLST_NM=품목분류명, PRDT_NM_CONT=구체적 제품명, BIZ_IPLA_NM=업체, MDEQ_PRDLST_SN=허가번호,
+  // UDI_MODL_NM_SN=모델일련번호, UDIDI_CD=UDI-DI, CLSF_GRAD_CD=등급, CARE_SAL_CD_INPT_VAL=요양급여(EDI)코드
   const items = list.map((it) => ({
-    name: pick(it, "prdtNm", "prdlstNm", "itemName", "productName"),
-    model: pick(it, "modlNm", "modelName"),
-    spec: pick(it, "specNm", "specInfo", "spec"),
-    grade: pick(it, "grade", "gradeNm"),
-    manufacturer: pick(it, "mnftrName", "manufacturerName", "imptrName"),
-    permit_no: pick(it, "permitNo", "lcnsNo", "prmsNo"),
-    udi_di: pick(it, "udidiCd", "udiDi", "udiCd"),
-    edi_code: pick(it, "ediCd", "ediCode", "insuClsNo"),
+    name: pick(it, "PRDT_NM_CONT", "PRDLST_NM", "prdtNm", "prdlstNm"),
+    model: pick(it, "UDI_MODL_NM_SN", "MDL_NM", "modlNm"),
+    spec: pick(it, "PRDLST_NM", "specNm"),
+    grade: pick(it, "CLSF_GRAD_CD", "grade"),
+    manufacturer: pick(it, "BIZ_IPLA_NM", "MNFTR_NM", "mnftrName"),
+    permit_no: pick(it, "MDEQ_PRDLST_SN", "PRMS_NO", "permitNo"),
+    udi_di: pick(it, "UDIDI_CD", "udidiCd"),
+    edi_code: pick(it, "CARE_SAL_CD_INPT_VAL", "ediCd"),
     raw: it,
   }));
 
