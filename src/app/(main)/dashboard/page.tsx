@@ -5,6 +5,7 @@ import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/format";
 import { Package, ShoppingCart, Truck, TrendingUp, ArrowUpRight, Send } from "lucide-react";
+import { useToast } from "@/components/Toast";
 
 interface DashboardStats {
   productCount: number;
@@ -68,6 +69,7 @@ export default function DashboardPage() {
   const [monthComparison, setMonthComparison] = useState<MonthComparison>({ thisMonth: { purchase: 0, supply: 0, margin: 0 }, lastMonth: { purchase: 0, supply: 0, margin: 0 } });
   const [branchMonthStats, setBranchMonthStats] = useState<BranchMonthStats[]>([]);
   const [loading, setLoading] = useState(true);
+  const toast = useToast();
 
   useEffect(() => {
     async function fetchData() {
@@ -183,11 +185,13 @@ export default function DashboardPage() {
         setBranchMonthStats(branchStats);
       } catch (err) {
         console.error("Dashboard fetch error:", err);
+        toast.error("대시보드 데이터를 불러오지 못했습니다.");
       } finally {
         setLoading(false);
       }
     }
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const statCards = [
