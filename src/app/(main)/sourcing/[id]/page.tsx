@@ -25,6 +25,7 @@ interface Demand {
   id: string;
   raw_name: string;
   product_id: string | null;
+  product: { name: string; spec: string | null } | null;
   required_qty: number;
   unit_label: string | null;
   purpose: string | null;
@@ -135,7 +136,7 @@ export default function SourcingDetailPage() {
     const { data } = await supabase
       .from("sourcing_jobs")
       .select(
-        "id, title, requester, delivery_note, status, branch:branches(name), demand_lines(id, raw_name, product_id, required_qty, unit_label, purpose, sort_order, sourcing_allocations(id, demand_line_id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty, note, vendor:vendors(name)))"
+        "id, title, requester, delivery_note, status, branch:branches(name), demand_lines(id, raw_name, product_id, product:products(name, spec), required_qty, unit_label, purpose, sort_order, sourcing_allocations(id, demand_line_id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty, note, vendor:vendors(name)))"
       )
       .eq("id", id)
       .single();
@@ -402,7 +403,8 @@ export default function SourcingDetailPage() {
       const qty = billedQty(a);
       g.subtotal += qty * (a.unit_price ?? 0);
       g.allocs.push(a);
-      g.items.push({ name: d.raw_name, unit: d.unit_label, qty, price: a.unit_price, status: a.status });
+      const label = d.product ? `${d.product.name}${d.product.spec ? ` ${d.product.spec}` : ""}` : d.raw_name;
+      g.items.push({ name: label, unit: d.unit_label, qty, price: a.unit_price, status: a.status });
     }
   }
   const groups = Array.from(groupMap.values()).sort((x, y) => y.subtotal - x.subtotal);
@@ -471,6 +473,12 @@ export default function SourcingDetailPage() {
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="min-w-0">
                     <h3 className="font-bold text-gray-900 text-sm md:text-base">{d.raw_name}</h3>
+                    {d.product && (
+                      <p className="text-xs text-blue-600 mt-0.5">
+                        → {d.product.name}
+                        {d.product.spec ? ` ${d.product.spec}` : ""}
+                      </p>
+                    )}
                     <p className="text-xs text-gray-500 mt-0.5">
                       필요 {d.required_qty}
                       {d.unit_label ? ` ${d.unit_label}` : ""}
