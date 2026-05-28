@@ -82,6 +82,7 @@ export type Database = {
           raw_name: string
           required_qty: number
           sort_order: number | null
+          supply_price: number | null
           unit_label: string | null
         }
         Insert: {
@@ -94,6 +95,7 @@ export type Database = {
           raw_name: string
           required_qty?: number
           sort_order?: number | null
+          supply_price?: number | null
           unit_label?: string | null
         }
         Update: {
@@ -106,6 +108,7 @@ export type Database = {
           raw_name?: string
           required_qty?: number
           sort_order?: number | null
+          supply_price?: number | null
           unit_label?: string | null
         }
         Relationships: [
