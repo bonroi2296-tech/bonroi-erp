@@ -149,11 +149,6 @@ export default function ProductsPage() {
                   ) : (
                     <span className="text-[11px] text-gray-300">사진 없음</span>
                   )}
-                  {product.category && (
-                    <span className={`absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                      product.category === "양방" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"
-                    }`}>{product.category}</span>
-                  )}
                 </div>
                 <div className="p-2.5 space-y-0.5 flex-1">
                   <p className="text-sm font-semibold text-gray-900 line-clamp-2 leading-snug">{product.name}</p>
@@ -164,6 +159,16 @@ export default function ProductsPage() {
                     </p>
                   )}
                   {product.description && <p className="text-[11px] text-gray-400 line-clamp-1">{product.description}</p>}
+                  <p className="text-sm font-bold text-gray-900 pt-1">
+                    {product.supply_price ? (
+                      <>
+                        {formatCurrency(product.supply_price)}
+                        <span className="ml-1 text-[10px] font-normal text-gray-400">(변동 가능)</span>
+                      </>
+                    ) : (
+                      <span className="text-xs font-normal text-gray-400">가격 문의</span>
+                    )}
+                  </p>
                 </div>
               </button>
             ))}
