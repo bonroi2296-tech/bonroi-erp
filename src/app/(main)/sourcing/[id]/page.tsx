@@ -25,11 +25,12 @@ interface Demand {
   id: string;
   raw_name: string;
   product_id: string | null;
-  product: { name: string; spec: string | null } | null;
+  product: { name: string; spec: string | null; supply_price: number | null } | null;
   required_qty: number;
   unit_label: string | null;
   purpose: string | null;
   sort_order: number | null;
+  supply_price: number | null;
   sourcing_allocations: Alloc[];
 }
 interface Job {
@@ -139,7 +140,7 @@ export default function SourcingDetailPage() {
     const { data } = await supabase
       .from("sourcing_jobs")
       .select(
-        "id, title, requester, delivery_note, status, branch_id, created_at, branch:branches(name), demand_lines(id, raw_name, product_id, product:products(name, spec), required_qty, unit_label, purpose, sort_order, sourcing_allocations(id, demand_line_id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty, note, vendor:vendors(name)))"
+        "id, title, requester, delivery_note, status, branch_id, created_at, branch:branches(name), demand_lines(id, raw_name, product_id, supply_price, product:products(name, spec, supply_price), required_qty, unit_label, purpose, sort_order, sourcing_allocations(id, demand_line_id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty, note, vendor:vendors(name)))"
       )
       .eq("id", id)
       .single();
@@ -232,6 +233,16 @@ export default function SourcingDetailPage() {
 
   const deleteDemand = async (demandId: string) => {
     const { error } = await supabase.from("demand_lines").delete().eq("id", demandId);
+    if (error) return toast.error(error.message);
+    fetchJob();
+  };
+
+  // 품목별 납품가(병원가) 덮어쓰기. 빈값이면 null → 품목마스터 기본값 사용.
+  const updateDemandSupply = async (d: Demand, raw: string) => {
+    const v = raw.trim() === "" ? null : Number(raw);
+    if (v !== null && Number.isNaN(v)) return;
+    if (v === (d.supply_price ?? null)) return;
+    const { error } = await supabase.from("demand_lines").update({ supply_price: v }).eq("id", d.id);
     if (error) return toast.error(error.message);
     fetchJob();
   };
@@ -329,12 +340,13 @@ export default function SourcingDetailPage() {
       const { data: dls } = await supabase
         .from("demand_lines")
         .select(
-          "id, raw_name, product_id, product:products(name, spec, category, supply_price), sourcing_allocations(id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty)"
+          "id, raw_name, product_id, supply_price, product:products(name, spec, category, supply_price), sourcing_allocations(id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty)"
         )
         .eq("job_id", id);
       type DRow = {
         raw_name: string;
         product_id: string | null;
+        supply_price: number | null;
         product: { name: string; spec: string | null; category: string | null; supply_price: number | null } | null;
         sourcing_allocations: Alloc[];
       };
@@ -349,7 +361,7 @@ export default function SourcingDetailPage() {
           if (d.product?.category) category = d.product.category;
           const label = d.product ? `${d.product.name}${d.product.spec ? ` ${d.product.spec}` : ""}` : d.raw_name;
           const price = a.unit_price ?? 0;
-          const supply = d.product?.supply_price ?? 0; // 납품가(병원가)는 품목마스터 기준
+          const supply = d.supply_price ?? d.product?.supply_price ?? 0; // 품목별 덮어쓰기 우선, 없으면 품목마스터
           lineItems.push({
             order_id: "",
             product_id: d.product_id,
@@ -618,6 +630,23 @@ export default function SourcingDetailPage() {
                       {d.unit_label ? ` ${d.unit_label}` : ""}
                       {d.purpose ? ` · ${d.purpose}` : ""}
                     </p>
+                    <div className="flex items-center gap-1.5 mt-1.5">
+                      <span className="text-xs text-gray-400">납품가(병원가)</span>
+                      <input
+                        type="number"
+                        min={0}
+                        defaultValue={d.supply_price ?? ""}
+                        placeholder={d.product?.supply_price != null ? String(d.product.supply_price) : "0"}
+                        onBlur={(e) => updateDemandSupply(d, e.target.value)}
+                        className="w-24 px-2 py-1 border border-gray-200 rounded-md text-sm text-right focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                      <span className="text-xs text-gray-400">원</span>
+                      {d.supply_price == null && (
+                        <span className="text-[10px] text-gray-400">
+                          {d.product?.supply_price != null ? "품목마스터 기본값" : "미설정"}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {shortfall === 0 ? (
