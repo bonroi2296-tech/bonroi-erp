@@ -5,6 +5,7 @@ import Link from "next/link";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/Toast";
+import { branchColor } from "@/lib/colors";
 import { Plus, X, Trash2, PackageSearch, AlertTriangle, CheckCircle2, Sparkles } from "lucide-react";
 
 interface AllocRow {
@@ -24,7 +25,7 @@ interface JobRow {
   delivery_note: string | null;
   status: string;
   created_at: string | null;
-  branch: { name: string } | null;
+  branch: { name: string; short_name: string | null } | null;
   demand_lines: DemandRow[];
 }
 
@@ -67,7 +68,7 @@ export default function SourcingPage() {
     const { data } = await supabase
       .from("sourcing_jobs")
       .select(
-        "id, title, requester, delivery_note, status, created_at, branch:branches(name), demand_lines(id, required_qty, sourcing_allocations(order_qty, status, shipped_qty))"
+        "id, title, requester, delivery_note, status, created_at, branch:branches(name, short_name), demand_lines(id, required_qty, sourcing_allocations(order_qty, status, shipped_qty))"
       )
       .order("created_at", { ascending: false });
     setJobs((data as unknown as JobRow[]) || []);
@@ -201,7 +202,17 @@ export default function SourcingPage() {
                     ) : null}
                   </div>
                   <div className="text-xs text-gray-500 space-y-0.5 mb-3">
-                    {job.branch?.name && <p>지점: {job.branch.name}</p>}
+                    {job.branch?.name && (
+                      <p className="flex items-center gap-1.5">
+                        <span>지점:</span>
+                        {job.branch.short_name ? (
+                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${branchColor(job.branch.short_name)}`}>
+                            {job.branch.short_name}
+                          </span>
+                        ) : null}
+                        <span className="text-gray-700">{job.branch.name}</span>
+                      </p>
+                    )}
                     {job.requester && <p>요청처: {job.requester}</p>}
                     {job.delivery_note && <p className="truncate">배송: {job.delivery_note}</p>}
                     <p>품목 {s.lineCount}종</p>

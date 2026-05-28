@@ -5,6 +5,7 @@ import TopBar from "@/components/TopBar";
 import { useToast } from "@/components/Toast";
 import { supabase } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/format";
+import { branchColor, vendorColor } from "@/lib/colors";
 import { Plus, Search, ChevronDown, ChevronRight, X, Trash2, ChevronUp } from "lucide-react";
 
 interface OrderRow {
@@ -519,7 +520,7 @@ export default function OrdersPage() {
                           <span className="font-semibold text-sm md:text-base text-gray-900">
                             {group.order_date}
                           </span>
-                          <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-medium">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${branchColor(group.branch_short)}`}>
                             {group.branch_short}
                           </span>
                           <span className="text-xs text-gray-400">
@@ -580,7 +581,15 @@ export default function OrdersPage() {
                                         {vo.order_number}
                                       </td>
                                       <td className="px-3 py-2 text-gray-500">{vo.category}</td>
-                                      <td className="px-3 py-2 text-gray-700">{vo.vendor_name}</td>
+                                      <td className="px-3 py-2">
+                                        {vo.vendor_name ? (
+                                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${vendorColor(vo.vendor_name)}`}>
+                                            {vo.vendor_name}
+                                          </span>
+                                        ) : (
+                                          <span className="text-gray-400 text-xs">-</span>
+                                        )}
+                                      </td>
                                       <td className="px-3 py-2">
                                         <select
                                           value={vo.status}

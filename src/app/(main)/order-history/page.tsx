@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { Search, Download, Filter, ChevronDown, ChevronUp } from "lucide-react";
+import { branchColor, vendorColor } from "@/lib/colors";
 
 interface OrderHistoryRow {
   id: string;
@@ -26,46 +27,7 @@ interface Branch {
   short_name: string;
 }
 
-// 지점·거래처 색은 영역 분리 → 같은 행에 같은 색이 두 번 안 뜨게.
-// 진한 톤(-200/-900)로 가시성 확보. 같은 이름은 항상 같은 색.
-const BRANCH_COLORS: Record<string, string> = {
-  강서: "bg-sky-200 text-sky-900",
-  광명: "bg-violet-200 text-violet-900",
-  성동: "bg-orange-200 text-orange-900",
-  신촌: "bg-emerald-200 text-emerald-900",
-};
-// 거래처별 고정 색(자주 쓰는 11곳). 빈도 높을수록 더 튀는 색.
-const VENDOR_COLORS: Record<string, string> = {
-  주사기닷컴: "bg-red-200 text-red-900",
-  한백상사: "bg-blue-200 text-blue-900",
-  SD바이오: "bg-fuchsia-200 text-fuchsia-900",
-  디에치몰: "bg-amber-200 text-amber-900",
-  케이엠몰: "bg-teal-200 text-teal-900",
-  메디오션: "bg-pink-200 text-pink-900",
-  허브원: "bg-lime-200 text-lime-900",
-  디에이치몰: "bg-indigo-200 text-indigo-900",
-  수진메디칼: "bg-rose-200 text-rose-900",
-  안진도매로: "bg-cyan-200 text-cyan-900",
-  기타: "bg-gray-200 text-gray-800",
-};
-// 미등록 이름 폴백 — 위 두 맵 색과 겹치지 않도록 잔여 톤만
-const FALLBACK_PALETTE = [
-  "bg-red-200 text-red-900",
-  "bg-amber-200 text-amber-900",
-  "bg-lime-200 text-lime-900",
-  "bg-teal-200 text-teal-900",
-  "bg-cyan-200 text-cyan-900",
-  "bg-blue-200 text-blue-900",
-  "bg-indigo-200 text-indigo-900",
-  "bg-fuchsia-200 text-fuchsia-900",
-  "bg-pink-200 text-pink-900",
-  "bg-rose-200 text-rose-900",
-];
-function chipColor(key: string): string {
-  let h = 0;
-  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
-  return FALLBACK_PALETTE[h % FALLBACK_PALETTE.length];
-}
+// 칩 색은 @/lib/colors 의 공용 헬퍼 사용(같은 이름 → 항상 같은 색).
 
 export default function OrderHistoryPage() {
   const [rows, setRows] = useState<OrderHistoryRow[]>([]);
@@ -470,13 +432,13 @@ export default function OrderHistoryPage() {
                     <tr key={r.id} className="hover:bg-blue-50/40 transition-colors">
                       <td className="px-2.5 py-1 text-gray-600 whitespace-nowrap text-xs">{formatDate(r.order_date)}</td>
                       <td className="px-2 py-1 whitespace-nowrap">
-                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${BRANCH_COLORS[r.branch_short] ?? chipColor(r.branch_short)}`}>
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${branchColor(r.branch_short)}`}>
                           {r.branch_short}
                         </span>
                       </td>
                       <td className="px-2 py-1 whitespace-nowrap">
                         {r.vendor_name && (
-                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${VENDOR_COLORS[r.vendor_name] ?? chipColor(r.vendor_name)}`}>
+                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${vendorColor(r.vendor_name)}`}>
                             {r.vendor_name}
                           </span>
                         )}
