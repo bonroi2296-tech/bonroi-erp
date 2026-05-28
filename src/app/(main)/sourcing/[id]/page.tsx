@@ -883,24 +883,33 @@ function ReconcileModal({
 }) {
   const toast = useToast();
   const [text, setText] = useState("");
-  const [image, setImage] = useState<{ base64: string; mime: string; name: string } | null>(null);
+  const [file, setFile] = useState<{ base64: string; mime: string; name: string } | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [rows, setRows] = useState<ReconcileRow[] | null>(null);
   const [fee, setFee] = useState(initialFee);
 
-  const onPickImage = (file: File | undefined | null) => {
-    if (!file || !file.type.startsWith("image/")) return;
+  const onPickFile = (f: File | undefined | null) => {
+    if (!f) return;
+    const isImage = f.type.startsWith("image/");
+    const isPdf = f.type === "application/pdf";
+    if (!isImage && !isPdf) return toast.error("이미지 또는 PDF 파일만 올릴 수 있어요.");
+    if (f.size > 15 * 1024 * 1024) return toast.error("파일이 너무 커요. 15MB 이하로 올려주세요.");
     const reader = new FileReader();
     reader.onload = () => {
       const res = String(reader.result);
-      setImage({ base64: res.split(",")[1] ?? "", mime: file.type || "image/png", name: file.name || "이미지" });
+      setFile({
+        base64: res.split(",")[1] ?? "",
+        mime: f.type || (isPdf ? "application/pdf" : "image/png"),
+        name: f.name || "파일",
+      });
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(f);
   };
   const handlePaste = (e: React.ClipboardEvent) => {
     for (const it of Array.from(e.clipboardData?.items ?? [])) {
-      if (it.type.startsWith("image/")) {
-        onPickImage(it.getAsFile());
+      if (it.type.startsWith("image/") || it.type === "application/pdf") {
+        onPickFile(it.getAsFile());
         e.preventDefault();
         return;
       }
@@ -908,7 +917,7 @@ function ReconcileModal({
   };
 
   const analyze = async () => {
-    if (!text.trim() && !image) return toast.error("출고확인서 텍스트나 이미지를 넣으세요.");
+    if (!text.trim() && !file) return toast.error("출고확인서 텍스트·이미지·PDF 중 하나를 넣어주세요.");
     setAnalyzing(true);
     try {
       const res = await fetch("/api/reconcile", {
@@ -917,8 +926,8 @@ function ReconcileModal({
         body: JSON.stringify({
           jobId,
           text: text.trim() || undefined,
-          imageBase64: image?.base64,
-          imageMimeType: image?.mime,
+          imageBase64: file?.base64,
+          imageMimeType: file?.mime,
         }),
       });
       const data = await res.json().catch(() => null);
@@ -941,7 +950,21 @@ function ReconcileModal({
   const matchedCount = (rows ?? []).filter((r) => r.demand_line_id).length;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (!rows) setDragOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.target === e.currentTarget) setDragOver(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        if (!rows) onPickFile(e.dataTransfer.files?.[0]);
+      }}
+    >
       <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-white border-b border-gray-200 px-5 py-3 flex justify-between items-center">
           <h2 className="text-base font-bold text-gray-900">{group.name} · 출고확인서 반영</h2>
@@ -951,24 +974,41 @@ function ReconcileModal({
         </div>
         <div className="p-5 space-y-4">
           {!rows && (
-            <>
+            <div
+              className={`space-y-4 rounded-lg transition ${
+                dragOver ? "ring-2 ring-blue-400 ring-offset-2" : ""
+              }`}
+            >
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onPaste={handlePaste}
                 rows={5}
-                placeholder="거래처 출고확인서/거래명세서 텍스트 붙여넣기 — 또는 이미지를 Ctrl+V로 붙여넣으세요."
+                placeholder="거래처 출고확인서/거래명세서 텍스트를 붙여넣거나, 이미지·PDF 파일을 여기로 끌어다 놓으세요(Ctrl+V도 가능)."
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-y"
               />
-              {image && (
-                <div className="text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">
-                  이미지 첨부됨: {image.name}
+              {dragOver && (
+                <div className="text-xs text-blue-700 bg-blue-50 border border-dashed border-blue-300 rounded-lg px-3 py-2 text-center">
+                  여기에 놓으면 파일이 첨부됩니다
+                </div>
+              )}
+              {file && (
+                <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">
+                  <span className="flex-1 truncate">첨부됨: {file.name}</span>
+                  <button onClick={() => setFile(null)} className="text-emerald-700 hover:text-emerald-900">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               )}
               <div className="flex items-center gap-2">
                 <label className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm cursor-pointer hover:bg-gray-50">
-                  <Upload className="w-4 h-4" /> 이미지 선택
-                  <input type="file" accept="image/*" className="hidden" onChange={(e) => onPickImage(e.target.files?.[0])} />
+                  <Upload className="w-4 h-4" /> 파일 선택
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    className="hidden"
+                    onChange={(e) => onPickFile(e.target.files?.[0])}
+                  />
                 </label>
                 <button
                   onClick={analyze}
@@ -978,7 +1018,7 @@ function ReconcileModal({
                   <Sparkles className="w-4 h-4" /> {analyzing ? "분석 중..." : "AI 분석"}
                 </button>
               </div>
-            </>
+            </div>
           )}
 
           {rows && (
