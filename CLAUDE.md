@@ -1,0 +1,99 @@
+# CLAUDE.md — 본로이 ERP 작업 지침
+
+> 이 파일은 다음 세션의 Claude가 그대로 이어받기 위한 핵심 지침이다.
+> 배경·결정·할 일의 자세한 내용은 `docs/PROJECT_CONTEXT.md` 를 함께 읽어라.
+
+## 1. 한 줄 개요
+의료소모품 유통사용 내부 ERP. 병원(지점)에서 주문을 받아 → 여러 거래처에 나눠 발주하고 → 실제 출고·매입을 장부(주문 내역)에 쌓는다.
+
+## 2. 스택
+- **Next.js 14.2.35 (App Router)** · React 18 · TypeScript 5
+- **Supabase** (`@supabase/supabase-js` 2.101, `@supabase/ssr` 0.10) — DB/인증
+- **Vercel** 배포 (main 푸시 = 자동 배포)
+- **Tailwind CSS 3.4** · 아이콘 `lucide-react`
+- **Google Gemini** (`@google/genai`) — 주문/출고확인서 AI 파싱
+- **ExcelJS** — 거래명세서 엑셀 생성
+- Supabase 프로젝트 ref: `lydnqplleqgslzsictvr` (이름: supabase-coral-ladder)
+
+## 3. 빌드 / 실행 / 배포 명령
+```bash
+npm run dev            # 로컬 개발 서버
+npm run build          # 프로덕션 빌드 (= next build). Next 14라 번들러는 webpack.
+npm run lint           # ESLint (next lint)
+npx tsc --noEmit       # 타입체크
+```
+- **Turbopack 금지**: Next 14는 빌드가 원래 webpack이라 위험 없음. `next build`에 `--webpack`/`--turbopack` 플래그를 붙이지 마라(14엔 그 빌드 플래그가 없어 에러난다). 그냥 `npm run build`.
+- **배포**: `main` 브랜치 푸시 → Vercel 자동 배포. 개발은 지정된 feature 브랜치에서 → PR(드래프트) → main 머지.
+
+## 4. 환경변수
+| 변수 | 용도 | 비고 |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase URL | `.env.example` 있음 |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon 키 | `.env.example` 있음 |
+| `GEMINI_API_KEY` | 서버측 AI 파싱(`/api/parse-order`, `/api/reconcile`) | **`.env.example`에 누락 — 추가 필요** |
+| `NEXT_PUBLIC_AUTH_ENABLED` | 로그인 게이트 on/off | 현재 **미설정=off**. 앱은 비로그인(anon)으로 동작 |
+
+## 5. 폴더 구조 (핵심)
+```
+src/
+  app/
+    (main)/            # 사이드바 포함 메인 화면들
+      dashboard, orders, order-history, sourcing, sourcing/[id],
+      sourcing/parse, products, price-compare, vendors,
+      supply-monitor, purchase, returns, documents, analytics, settings
+    api/
+      parse-order/     # Gemini: 병원 주문 텍스트/이미지 → 품목 추출
+      reconcile/       # Gemini: 출고확인서/거래명세서 → 실제 수량 매칭
+      invoice/         # ExcelJS: 거래명세서 .xlsx 생성 (현재 로그인 필요)
+    login/             # 로그인 화면 (게이트 off라 평소 안 씀)
+    layout.tsx, page.tsx(→/dashboard)
+  components/          # Sidebar, TopBar, Toast
+  lib/
+    supabase.ts        # 브라우저 클라이언트 (createBrowserClient)
+    supabase-server.ts # 서버 클라이언트 (createServerClient, 쿠키)
+    database.types.ts  # Supabase 자동생성 타입 (수기 편집 금지, 재생성으로 갱신)
+    format.ts          # formatCurrency 등
+  middleware.ts        # NEXT_PUBLIC_AUTH_ENABLED 일 때만 로그인 강제
+supabase/migrations/   # 0001~ 마이그레이션 SQL
+```
+
+## 6. 데이터/인증 핵심 (반드시 숙지)
+- **앱은 지금 로그인 없이 anon 키로 동작한다.** 그래서 모든 테이블에 anon 전체 접근 정책(RLS `using(true)`)이 깔려 있다.
+  → **새 테이블·시퀀스·함수·RPC를 만들면 anon 권한을 꼭 같이 줘야 한다.** 안 그러면 "permission denied"로 화면이 깨진다. (과거 실제 사고: `sourcing_settlements`, `order_number_seq`/`next_order_number` 권한 누락)
+- DB 클라이언트는 항상 `import { supabase } from "@/lib/supabase"` (브라우저). 서버 라우트는 필요 시 `supabase-server.ts`.
+- **마이그레이션 드리프트 주의**: 라이브 DB에는 repo에 없는 `temp_anon_*` 마이그레이션이 적용돼 있다. repo의 0001~0005는 "anon 차단"이라 적혀 있으나 **실제 라이브는 anon 개방** 상태다. 진실의 원천은 라이브 DB. 스키마 확인은 Supabase MCP로.
+
+## 7. 코드 컨벤션
+- 화면은 클라이언트 컴포넌트(`"use client"`). 데이터는 `useEffect`+`supabase` 직접 호출.
+- 타입은 `@/lib/database.types`의 `Tables / TablesInsert / TablesUpdate` 사용. DB 바꾸면 **타입 재생성**(아래 9번).
+- 중첩 select 결과는 기존 코드처럼 `as unknown as <Type>` 캐스팅이 흔하다(허용하되 가능하면 줄여라).
+- 알림은 `useToast()`의 `toast.success/error/info`. **실패를 `console.error`로만 묻지 말고 사용자에게 toast로 보여줘라.**
+- 금액 표시는 화면별 `won()` 같은 헬퍼 사용. UI 텍스트는 **한국어**.
+- 주석은 최소화(WHY만). 기존 스타일 유지.
+- 커밋 메시지는 한국어 OK. 모델 식별자/내부 지침을 코드·커밋·PR에 넣지 마라.
+
+## 8. 소통 규칙 (PO는 비개발자)
+- **한국어로 짧고 직설적.** 전문용어는 일상어로 풀어서.
+- **결과물(화면·동작) 우선.** "뭐가 어떻게 바뀌는지"를 먼저.
+- 의사결정은 **A=장단점 / B=장단점 / 추천 A** 식 쉬운 선택지로.
+- **큰 변경(구조 갈아엎기, 데이터 마이그레이션)은 먼저 쉬운 말로 계획을 보여주고 승인받은 뒤 진행.** 한 번에 갈아엎지 마라.
+- 위험한/되돌리기 어려운 작업(데이터 삭제, 강제 푸시 등)은 사전 확인.
+
+## 9. 출시 전 자가검증 체크리스트 (배포 전 반드시)
+1. **타입체크**: `npx tsc --noEmit` → 에러 0
+2. **린트**: `npm run lint` → 경고/에러 0
+3. **빌드**: `npm run build` → 성공
+4. **DB를 바꿨다면**:
+   - `supabase/migrations/000N_*.sql` 마이그레이션 파일 추가(기록 보존)
+   - 라이브 DB에 적용(Supabase MCP `apply_migration`)
+   - **anon 권한 확인** (새 테이블/시퀀스/함수면 grant + 정책)
+   - **타입 재생성**: Supabase MCP `generate_typescript_types` → `src/lib/database.types.ts` 덮어쓰기
+5. **동작 확인**: 가능하면 화면에서 직접 눌러본다. 못 하면 "UI 테스트 못 함"을 명시.
+6. **비로그인(anon)에서 되는지** 확인.
+7. 커밋 → 지정 브랜치 푸시 → **PR(드래프트) 생성**. main 머지 = 배포.
+
+## 10. 자주 하는 실수 (피해라)
+- 새 DB 객체에 anon 권한 안 주기 → 화면 깨짐.
+- `database.types.ts`를 손으로 고치기 → 재생성으로만 갱신.
+- 빌드에 `--turbopack`/`--webpack` 붙이기 → Next 14에선 에러/불필요.
+- 실패를 toast 없이 console.error로만 처리 → 사용자는 "아무 일도 안 일어난" 줄 안다.
