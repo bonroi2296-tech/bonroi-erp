@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/Toast";
 import type { TablesUpdate, TablesInsert } from "@/lib/database.types";
-import { ArrowLeft, Plus, Trash2, AlertTriangle, CheckCircle2, Truck, Upload, X, Sparkles, Copy, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, CheckCircle2, Truck, Upload, X, Sparkles, Copy, ChevronDown, ChevronUp } from "lucide-react";
 
 interface Alloc {
   id: string;
@@ -105,6 +105,19 @@ function securedOf(a: Alloc): number {
   if (a.status === "partial") return a.shipped_qty ?? 0;
   return 0;
 }
+// 병원에 알릴 사유. 빈 문자열이면 정상.
+function reasonOf(d: Demand): string {
+  const allocs = d.sourcing_allocations;
+  const secured = allocs.reduce((s, a) => s + securedOf(a), 0);
+  const ordered = allocs.reduce((s, a) => s + a.order_qty, 0);
+  const hasShipped = allocs.some((a) => a.status === "shipped" || a.status === "partial");
+  const allUnavail = allocs.length > 0 && allocs.every((a) => a.status === "unavailable");
+  if (allUnavail) return "재고 없음";
+  if (hasShipped && secured < d.required_qty) return `부족 출고 (-${d.required_qty - secured})`;
+  if (allocs.length === 0) return "거래처 배정 필요";
+  if (ordered < d.required_qty) return `발주 부족 (-${d.required_qty - ordered})`;
+  return "";
+}
 // 정산 금액 기준 수량: 출고 확정 전(주문)이면 발주수량, 확정 후엔 실제 출고수량
 function billedQty(a: Alloc): number {
   if (a.status === "shipped") return a.order_qty;
@@ -128,6 +141,15 @@ export default function SourcingDetailPage() {
   const [vendorOptions, setVendorOptions] = useState<Record<string, VendorOption[]>>({});
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [reconcileFor, setReconcileFor] = useState<VendorGroup | null>(null);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const toggleExpand = (id: string) => {
+    setExpandedRows((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  };
   const [loading, setLoading] = useState(true);
 
   // 품목(수요줄) 추가 폼
@@ -245,6 +267,35 @@ export default function SourcingDetailPage() {
     const { error } = await supabase.from("demand_lines").update({ supply_price: v }).eq("id", d.id);
     if (error) return toast.error(error.message);
     fetchJob();
+  };
+
+  // 병원용 변경 내역(거래처·단가 제외) 텍스트를 클립보드로
+  const copyForHospital = async () => {
+    if (!job) return;
+    const rows: string[][] = [["주문 제품", "주문 수량", "배송 제품", "배송 수량", "사유"]];
+    for (const d of job.demand_lines) {
+      const secured = d.sourcing_allocations.reduce((s, a) => s + securedOf(a), 0);
+      const reason = reasonOf(d);
+      const productLabel = d.product
+        ? `${d.product.name}${d.product.spec ? ` ${d.product.spec}` : ""}`
+        : d.raw_name;
+      const orderQty = `${d.required_qty}${d.unit_label ? ` ${d.unit_label}` : ""}`;
+      const showShipped = reason !== "재고 없음";
+      rows.push([
+        d.raw_name,
+        orderQty,
+        showShipped ? productLabel : "—",
+        showShipped ? String(secured) : "—",
+        reason,
+      ]);
+    }
+    const text = rows.map((r) => r.join("\t")).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`병원용 변경 내역 ${rows.length - 1}건 복사됨`);
+    } catch {
+      toast.error("복사 실패 — 표를 직접 선택해 복사하세요.");
+    }
   };
 
   const addAlloc = async (demandId: string, payload: { vendor_id: string | null; vendor_label: string | null; order_qty: number; unit_price: number | null }) => {
@@ -606,88 +657,124 @@ export default function SourcingDetailPage() {
           </div>
         )}
 
-        <p className="text-xs font-medium text-gray-500 pt-1">품목별 매칭·거래처 분류</p>
-        <div className="space-y-3">
-          {job.demand_lines.map((d) => {
-            const secured = d.sourcing_allocations.reduce((a, x) => a + securedOf(x), 0);
-            const ordered = d.sourcing_allocations.reduce((a, x) => a + x.order_qty, 0);
-            const shortfall = Math.max(0, d.required_qty - secured);
-            const orderShort = Math.max(0, d.required_qty - ordered);
-            const pct = d.required_qty > 0 ? Math.min(100, Math.round((secured / d.required_qty) * 100)) : 0;
-            return (
-              <div key={d.id} className="bg-white rounded-xl border border-gray-200 p-4">
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div className="min-w-0">
-                    <h3 className="font-bold text-gray-900 text-sm md:text-base">{d.raw_name}</h3>
-                    {d.product && (
-                      <p className="text-xs text-blue-600 mt-0.5">
-                        → {d.product.name}
-                        {d.product.spec ? ` ${d.product.spec}` : ""}
-                      </p>
+        <div className="flex items-center justify-between mt-2 mb-2">
+          <h2 className="text-sm font-bold text-gray-900">
+            병원 주문 vs 실제 출고
+            <span className="ml-2 text-xs font-normal text-gray-400">한 줄을 누르면 거래처/단가가 펼쳐집니다</span>
+          </h2>
+          <button
+            onClick={copyForHospital}
+            className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-700 hover:bg-gray-50"
+            title="병원에 보낼 변경 내역(거래처·단가 제외) 텍스트를 클립보드에 복사"
+          >
+            <Copy className="w-3.5 h-3.5" /> 병원용 변경 내역 복사
+          </button>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200 text-[11px] text-gray-500 uppercase">
+                <th className="w-6"></th>
+                <th className="text-left px-3 py-2">주문 제품(병원)</th>
+                <th className="text-right px-2 py-2 whitespace-nowrap">주문 수량</th>
+                <th className="text-left px-3 py-2">출고 제품(실제)</th>
+                <th className="text-right px-2 py-2 whitespace-nowrap">출고 수량</th>
+                <th className="text-left px-2 py-2">사유</th>
+                <th className="w-8"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {job.demand_lines.map((d) => {
+                const secured = d.sourcing_allocations.reduce((a, x) => a + securedOf(x), 0);
+                const ordered = d.sourcing_allocations.reduce((a, x) => a + x.order_qty, 0);
+                const reason = reasonOf(d);
+                const productLabel = d.product
+                  ? `${d.product.name}${d.product.spec ? ` ${d.product.spec}` : ""}`
+                  : "(매칭 필요)";
+                const showShipped = reason !== "재고 없음";
+                const expanded = expandedRows.has(d.id);
+                const reasonCls = reason === "재고 없음"
+                  ? "bg-red-100 text-red-700"
+                  : reason
+                  ? "bg-amber-100 text-amber-700"
+                  : "";
+                return (
+                  <Fragment key={d.id}>
+                    <tr
+                      onClick={() => toggleExpand(d.id)}
+                      className="cursor-pointer hover:bg-blue-50/40"
+                    >
+                      <td className="px-2 text-gray-400 text-xs">{expanded ? "▾" : "▸"}</td>
+                      <td className="px-3 py-1.5 text-xs text-gray-900 font-medium">{d.raw_name}</td>
+                      <td className="px-2 py-1.5 text-right text-xs whitespace-nowrap">
+                        {d.required_qty}{d.unit_label ? ` ${d.unit_label}` : ""}
+                      </td>
+                      <td className="px-3 py-1.5 text-xs text-gray-700">
+                        {showShipped ? productLabel : <span className="text-gray-400">—</span>}
+                      </td>
+                      <td className="px-2 py-1.5 text-right text-xs whitespace-nowrap">
+                        {showShipped ? secured : <span className="text-gray-400">—</span>}
+                      </td>
+                      <td className="px-2 py-1.5 text-xs">
+                        {reason && (
+                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${reasonCls}`}>
+                            {reason}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-1 text-right">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteDemand(d.id); }}
+                          className="p-1 text-gray-300 hover:text-red-500"
+                          title="품목 삭제"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                    {expanded && (
+                      <tr>
+                        <td colSpan={7} className="bg-gray-50/70 px-4 py-3">
+                          <div className="space-y-3">
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                              <span className="text-gray-500">발주 {ordered} · 확보 {secured} / 필요 {d.required_qty}</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-gray-400">납품가(병원가)</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  defaultValue={d.supply_price ?? ""}
+                                  placeholder={d.product?.supply_price != null ? String(d.product.supply_price) : "0"}
+                                  onBlur={(e) => updateDemandSupply(d, e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-24 px-2 py-1 border border-gray-200 rounded-md text-sm text-right focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                                <span className="text-gray-400">원</span>
+                                {d.supply_price == null && (
+                                  <span className="text-[10px] text-gray-400">
+                                    {d.product?.supply_price != null ? "품목마스터 기본값" : "미설정"}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <AllocTable
+                              allocs={d.sourcing_allocations}
+                              vendors={vendors}
+                              options={d.product_id ? vendorOptions[d.product_id] ?? [] : []}
+                              onAdd={(p) => addAlloc(d.id, p)}
+                              onStatus={onStatusChange}
+                              onShipped={(a, qty) => updateAlloc(a.id, { shipped_qty: qty })}
+                              onDelete={deleteAlloc}
+                            />
+                          </div>
+                        </td>
+                      </tr>
                     )}
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      필요 {d.required_qty}
-                      {d.unit_label ? ` ${d.unit_label}` : ""}
-                      {d.purpose ? ` · ${d.purpose}` : ""}
-                    </p>
-                    <div className="flex items-center gap-1.5 mt-1.5">
-                      <span className="text-xs text-gray-400">납품가(병원가)</span>
-                      <input
-                        type="number"
-                        min={0}
-                        defaultValue={d.supply_price ?? ""}
-                        placeholder={d.product?.supply_price != null ? String(d.product.supply_price) : "0"}
-                        onBlur={(e) => updateDemandSupply(d, e.target.value)}
-                        className="w-24 px-2 py-1 border border-gray-200 rounded-md text-sm text-right focus:ring-2 focus:ring-blue-500 outline-none"
-                      />
-                      <span className="text-xs text-gray-400">원</span>
-                      {d.supply_price == null && (
-                        <span className="text-[10px] text-gray-400">
-                          {d.product?.supply_price != null ? "품목마스터 기본값" : "미설정"}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {shortfall === 0 ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
-                        <CheckCircle2 className="w-3 h-3" /> 확보완료
-                      </span>
-                    ) : orderShort === 0 ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                        <Truck className="w-3 h-3" /> 발주완료 · 출고대기
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-                        <AlertTriangle className="w-3 h-3" /> 미발주 {orderShort} · 거래처 분류 필요
-                      </span>
-                    )}
-                    <button onClick={() => deleteDemand(d.id)} className="p-1 text-gray-300 hover:text-red-500" title="품목 삭제">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between text-xs mb-1 text-gray-500">
-                  <span>확보 {secured} · 발주 {ordered}</span>
-                  <span>{pct}%</span>
-                </div>
-                <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-3">
-                  <div className={`h-full ${shortfall > 0 ? "bg-blue-500" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} />
-                </div>
-
-                <AllocTable
-                  allocs={d.sourcing_allocations}
-                  vendors={vendors}
-                  options={d.product_id ? vendorOptions[d.product_id] ?? [] : []}
-                  onAdd={(p) => addAlloc(d.id, p)}
-                  onStatus={onStatusChange}
-                  onShipped={(a, qty) => updateAlloc(a.id, { shipped_qty: qty })}
-                  onDelete={deleteAlloc}
-                />
-              </div>
-            );
-          })}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
 
         {/* 품목 추가 */}
