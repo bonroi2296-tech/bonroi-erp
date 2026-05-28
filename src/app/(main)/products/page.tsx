@@ -19,7 +19,20 @@ interface Product {
   pack_size: number | null;
   pack_unit: string | null;
   description: string | null;
+  edi_code: string | null;
   vendor_products: { unit_price: number; is_lowest: boolean; vendor: { name: string } }[];
+}
+
+// 공공 API 조회 결과 한 줄(서버 라우트의 정규화 형식)
+interface LookupItem {
+  name: string | null;
+  model: string | null;
+  spec: string | null;
+  grade: string | null;
+  manufacturer: string | null;
+  permit_no: string | null;
+  udi_di: string | null;
+  edi_code: string | null;
 }
 
 interface PriceTier {
@@ -65,7 +78,7 @@ export default function ProductsPage() {
       let query = supabase
         .from("products")
         .select(
-          "id, name, spec, category, supply_price, image_url, pack_size, pack_unit, description, vendor_products(unit_price, is_lowest, vendor:vendors(name))",
+          "id, name, spec, category, supply_price, image_url, pack_size, pack_unit, description, edi_code, vendor_products(unit_price, is_lowest, vendor:vendors(name))",
           { count: "exact" }
         );
 
@@ -437,8 +450,12 @@ function ProductInfoEditor({ product }: { product: Product }) {
   const [packUnit, setPackUnit] = useState(product.pack_unit ?? "");
   const [description, setDescription] = useState(product.description ?? "");
   const [uploading, setUploading] = useState(false);
+  const [ediCode, setEdiCode] = useState(product.edi_code ?? "");
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupItems, setLookupItems] = useState<LookupItem[] | null>(null);
+  const [lookupError, setLookupError] = useState<string | null>(null);
 
-  const save = async (patch: { image_url?: string | null; pack_size?: number | null; pack_unit?: string | null; description?: string | null }) => {
+  const save = async (patch: { image_url?: string | null; pack_size?: number | null; pack_unit?: string | null; description?: string | null; edi_code?: string | null }) => {
     const { error } = await supabase.from("products").update(patch).eq("id", product.id);
     if (error) toast.error("저장 실패: " + error.message);
   };
@@ -463,6 +480,28 @@ function ProductInfoEditor({ product }: { product: Product }) {
       toast.error(e instanceof Error ? e.message : "업로드 실패");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const lookupEdi = async () => {
+    const code = ediCode.trim();
+    if (!code) return toast.error("EDI 코드를 먼저 입력하세요.");
+    setLookupBusy(true);
+    setLookupError(null);
+    setLookupItems(null);
+    try {
+      const r = await fetch(`/api/catalog/lookup?edi=${encodeURIComponent(code)}`);
+      const j = await r.json();
+      if (!j.ok) {
+        setLookupError(j.error || "조회 실패");
+      } else {
+        setLookupItems(j.items || []);
+        if ((j.items || []).length === 0) toast.info("해당 EDI 로 결과가 없어요.");
+      }
+    } catch (e) {
+      setLookupError(e instanceof Error ? e.message : "네트워크 오류");
+    } finally {
+      setLookupBusy(false);
     }
   };
 
@@ -533,6 +572,44 @@ function ProductInfoEditor({ product }: { product: Product }) {
               className="flex-1 min-w-0 px-2 py-1 border border-gray-200 rounded text-xs resize-y focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500 w-20 flex-shrink-0">EDI 코드</label>
+            <input
+              type="text"
+              value={ediCode}
+              onChange={(e) => setEdiCode(e.target.value)}
+              onBlur={() => save({ edi_code: ediCode.trim() || null })}
+              placeholder="식약처 EDI/UDI-DI"
+              className="flex-1 min-w-0 px-2 py-1 border border-gray-200 rounded text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <button
+              type="button"
+              onClick={lookupEdi}
+              disabled={lookupBusy}
+              className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded text-xs hover:bg-gray-50 flex-shrink-0 disabled:opacity-50"
+              title="식약처 공공 API 로 이 EDI 정보를 조회"
+            >
+              {lookupBusy ? "조회 중…" : "공공 API 조회"}
+            </button>
+          </div>
+          {lookupError && (
+            <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+              {lookupError}
+            </div>
+          )}
+          {lookupItems && lookupItems.length > 0 && (
+            <div className="space-y-1.5 bg-white border border-gray-200 rounded p-2">
+              <p className="text-[10px] font-semibold text-gray-500">공공 API 결과 ({lookupItems.length}건)</p>
+              {lookupItems.map((it, i) => (
+                <div key={i} className="text-[11px] text-gray-700 border-t border-gray-100 pt-1 first:border-t-0 first:pt-0">
+                  <div className="font-medium text-gray-900">{it.name ?? "(이름 없음)"}{it.model ? ` · ${it.model}` : ""}</div>
+                  <div className="text-gray-500">
+                    {[it.manufacturer && `제조: ${it.manufacturer}`, it.grade && `${it.grade}등급`, it.permit_no && `허가 ${it.permit_no}`, it.udi_di && `UDI ${it.udi_di}`, it.edi_code && `EDI ${it.edi_code}`].filter(Boolean).join(" · ")}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
