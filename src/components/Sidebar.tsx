@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   LayoutDashboard, Package, ShoppingCart, Truck, Send,
-  FileText, BarChart3, Settings, X, TrendingDown, RotateCcw, ClipboardList, ShieldAlert, LogOut, PackageSearch,
+  FileText, BarChart3, Settings, X, TrendingDown, RotateCcw, ClipboardList, ShieldAlert, LogOut, PackageSearch, Menu,
   type LucideIcon,
 } from "lucide-react";
 
@@ -30,19 +30,19 @@ const navItems: NavItem[] = [
   { href: "/settings", icon: Settings, label: "설정" },
 ];
 
-interface SidebarProps {
-  mobileOpen: boolean;
-  onClose: () => void;
-}
-
-export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
+export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
   }, []);
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -50,61 +50,83 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
     router.refresh();
   };
 
+  const items = navItems.filter((i) => !i.hidden);
+
   return (
-    <aside
-      className={`
-        fixed inset-y-0 left-0 z-50 w-64 bg-gray-900 text-white flex flex-col
-        transform transition-transform duration-300 ease-in-out
-        md:sticky md:top-0 md:h-screen md:translate-x-0
-        ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
-      `}
-    >
-      <div className="p-4 flex items-center gap-3 border-b border-gray-800">
-        <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center flex-shrink-0">
-          <Package className="w-5 h-5" />
-        </div>
-        <span className="font-bold text-lg">본로이 ERP</span>
-        <button onClick={onClose} className="ml-auto text-gray-400 hover:text-white md:hidden">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
-      <nav className="flex-1 py-4 space-y-1 px-3 overflow-y-auto">
-        {navItems.filter((item) => !item.hidden).map((item) => {
-          const Icon = item.icon;
-          const active = pathname.startsWith(item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition ${
-                active ? "bg-blue-600 text-white" : "text-gray-400 hover:bg-gray-800 hover:text-white"
-              }`}
-            >
-              <Icon className="w-5 h-5 flex-shrink-0" />
-              <span className="text-sm font-medium">{item.label}</span>
-            </Link>
-          );
-        })}
-      </nav>
-      <div className="p-4 border-t border-gray-800">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-gray-700 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">
-            {(email?.[0] ?? "?").toUpperCase()}
+    <header className="sticky top-0 z-40 bg-gray-900 text-white border-b border-gray-800">
+      <div className="flex items-center gap-3 px-3 md:px-4 h-12">
+        <Link href="/dashboard" className="flex items-center gap-2 flex-shrink-0">
+          <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
+            <Package className="w-4 h-4" />
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{email ?? "로그인 정보 없음"}</p>
-            <p className="text-xs text-gray-500">관리자</p>
-          </div>
-          <button
-            onClick={handleSignOut}
-            title="로그아웃"
-            className="text-gray-400 hover:text-white p-1 flex-shrink-0"
-          >
+          <span className="font-bold text-sm hidden sm:inline">본로이 ERP</span>
+        </Link>
+
+        <nav className="hidden md:flex items-center gap-0.5 flex-1 overflow-x-auto">
+          {items.map((item) => {
+            const Icon = item.icon;
+            const active = pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition whitespace-nowrap ${
+                  active ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800 hover:text-white"
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="text-xs font-medium">{item.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className="md:hidden flex-1" />
+
+        <div className="hidden md:flex items-center gap-2 flex-shrink-0">
+          <span className="text-xs text-gray-400 truncate max-w-[160px]">{email ?? "로그인 정보 없음"}</span>
+          <button onClick={handleSignOut} title="로그아웃" className="text-gray-300 hover:text-white p-1">
             <LogOut className="w-4 h-4" />
           </button>
         </div>
+
+        <button
+          onClick={() => setMobileOpen((v) => !v)}
+          className="md:hidden p-1 text-gray-300 hover:text-white"
+          aria-label="메뉴"
+        >
+          {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+        </button>
       </div>
-    </aside>
+
+      {mobileOpen && (
+        <div className="md:hidden border-t border-gray-800 bg-gray-900">
+          <nav className="py-2">
+            {items.map((item) => {
+              const Icon = item.icon;
+              const active = pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex items-center gap-3 px-4 py-2.5 ${
+                    active ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-800"
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span className="text-sm">{item.label}</span>
+                </Link>
+              );
+            })}
+            <div className="border-t border-gray-800 mt-2 pt-2 px-4 flex items-center justify-between">
+              <span className="text-xs text-gray-400 truncate">{email ?? "로그인 정보 없음"}</span>
+              <button onClick={handleSignOut} className="flex items-center gap-1 text-xs text-gray-300 hover:text-white">
+                <LogOut className="w-3.5 h-3.5" /> 로그아웃
+              </button>
+            </div>
+          </nav>
+        </div>
+      )}
+    </header>
   );
 }
