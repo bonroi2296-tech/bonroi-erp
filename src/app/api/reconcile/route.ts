@@ -115,7 +115,9 @@ export async function POST(request: Request) {
       { text: `\n[발주품목]\n${catalogText}` },
     ];
     const genOnce = async (parts: Array<Record<string, unknown>>): Promise<string> => {
-      const models = ["gemini-3.5-flash", "gemini-2.5-flash"];
+      const envModels = (process.env.GEMINI_MODEL || "gemini-3.5-flash,gemini-2.5-flash")
+        .split(",").map((s) => s.trim()).filter(Boolean);
+      const models = envModels.length ? envModels : ["gemini-3.5-flash", "gemini-2.5-flash"];
       let lastErr: unknown = null;
       for (const model of models) {
         try {

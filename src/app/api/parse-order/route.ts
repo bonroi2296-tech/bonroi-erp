@@ -129,7 +129,10 @@ export async function POST(request: Request) {
 
     // 빠른 모델 우선(thinking 끔). 과부하 시 즉시 폴백(sleep 없음).
     const genOnce = async (parts: Array<Record<string, unknown>>): Promise<string> => {
-      const models = ["gemini-3.5-flash", "gemini-2.5-flash"];
+      // 모델 이름은 환경변수로 관리(쉼표 구분 폴백 가능). 미설정 시 안전한 기본값.
+      const envModels = (process.env.GEMINI_MODEL || "gemini-3.5-flash,gemini-2.5-flash")
+        .split(",").map((s) => s.trim()).filter(Boolean);
+      const models = envModels.length ? envModels : ["gemini-3.5-flash", "gemini-2.5-flash"];
       let lastErr: unknown = null;
       for (const model of models) {
         try {
