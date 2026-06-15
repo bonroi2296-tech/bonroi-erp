@@ -129,12 +129,12 @@ export async function POST(request: Request) {
 
     // 빠른 모델 우선(thinking 끔). 과부하 시 즉시 폴백(sleep 없음).
     const genOnce = async (parts: Array<Record<string, unknown>>): Promise<string> => {
-      const models = ["gemini-2.0-flash", "gemini-2.5-flash"];
+      const models = ["gemini-3.5-flash", "gemini-2.5-flash"];
       let lastErr: unknown = null;
       for (const model of models) {
         try {
           const cfg: Record<string, unknown> = { responseMimeType: "application/json", temperature: 0 };
-          if (model.includes("2.5")) cfg.thinkingConfig = { thinkingBudget: 0 };
+          if (!model.startsWith("gemini-2.0")) cfg.thinkingConfig = { thinkingBudget: 0 };
           const r = await ai.models.generateContent({ model, contents: [{ role: "user", parts }], config: cfg });
           return r.text ?? "";
         } catch (e) {

@@ -115,12 +115,12 @@ export async function POST(request: Request) {
       { text: `\n[발주품목]\n${catalogText}` },
     ];
     const genOnce = async (parts: Array<Record<string, unknown>>): Promise<string> => {
-      const models = ["gemini-2.0-flash", "gemini-2.5-flash"];
+      const models = ["gemini-3.5-flash", "gemini-2.5-flash"];
       let lastErr: unknown = null;
       for (const model of models) {
         try {
           const cfg: Record<string, unknown> = { responseMimeType: "application/json", temperature: 0 };
-          if (model.includes("2.5")) cfg.thinkingConfig = { thinkingBudget: 0 };
+          if (!model.startsWith("gemini-2.0")) cfg.thinkingConfig = { thinkingBudget: 0 };
           const r = await ai.models.generateContent({ model, contents: [{ role: "user", parts }], config: cfg });
           return r.text ?? "";
         } catch (e) {
