@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
+import { useToast } from "@/components/Toast";
 import { TrendingUp, Store, Package, Percent } from "lucide-react";
 
 interface Order {
@@ -49,6 +50,7 @@ export default function AnalyticsPage() {
   const [vendorRanks, setVendorRanks] = useState<VendorRank[]>([]);
   const [categoryData, setCategoryData] = useState<{ category: string; purchase: number }[]>([]);
   const [loading, setLoading] = useState(true);
+  const toast = useToast();
 
   useEffect(() => {
     async function fetchData() {
@@ -140,11 +142,13 @@ export default function AnalyticsPage() {
         setCategoryData(catData);
       } catch (err) {
         console.error("Analytics fetch error:", err);
+        toast.error("분석 데이터를 불러오지 못했습니다.");
       } finally {
         setLoading(false);
       }
     }
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (loading) {

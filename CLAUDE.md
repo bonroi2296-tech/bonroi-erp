@@ -30,7 +30,10 @@ npx tsc --noEmit       # 타입체크
 |---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase URL | `.env.example` 있음 |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon 키 | `.env.example` 있음 |
-| `GEMINI_API_KEY` | 서버측 AI 파싱(`/api/parse-order`, `/api/reconcile`) | **`.env.example`에 누락 — 추가 필요** |
+| `GEMINI_API_KEY` | 서버측 AI 파싱(`/api/parse-order`, `/api/reconcile`) | `.env.example` 있음 |
+| `GEMINI_MODEL` | 사용할 Gemini 모델(쉼표로 폴백 순서). 비우면 코드 기본값 | `.env.example` 있음 |
+| `EDI_API_KEY` | 식약처 UDI/EDI 조회(`/api/catalog/lookup`) | `.env.example` 있음. 보류 기능(§PROJECT_CONTEXT) |
+| `EDI_API_URL` | 식약처 API 정확한 요청 URL(미설정 시 추측값) | Vercel에만, 미설정 가능 |
 | `NEXT_PUBLIC_AUTH_ENABLED` | 로그인 게이트 on/off | 현재 **미설정=off**. 앱은 비로그인(anon)으로 동작 |
 
 ## 5. 폴더 구조 (핵심)
