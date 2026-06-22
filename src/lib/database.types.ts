@@ -166,6 +166,33 @@ export type Database = {
           },
         ]
       }
+      feedback: {
+        Row: {
+          created_at: string
+          id: string
+          message: string
+          page: string | null
+          resolution: string | null
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          message: string
+          page?: string | null
+          resolution?: string | null
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          message?: string
+          page?: string | null
+          resolution?: string | null
+          status?: string
+        }
+        Relationships: []
+      }
       invoices: {
         Row: {
           branch_id: string | null

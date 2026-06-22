@@ -168,6 +168,15 @@ export default function GuidePage() {
           </ol>
         </div>
 
+        {/* 개선 요청 안내 */}
+        <div className="flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+          <Lightbulb className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <span>
+            쓰다가 &ldquo;이건 좀 아닌데&rdquo; 싶으면, 화면 오른쪽 아래 <b>파란 &lsquo;개선 요청&rsquo; 버튼</b>을 눌러 바로 적어 보내세요.
+            따로 어디 안 들어가도 되고, 모아서 반영합니다.
+          </span>
+        </div>
+
         {/* 화면별 가이드 */}
         {sections.map((sec) => {
           const Icon = sec.icon;
