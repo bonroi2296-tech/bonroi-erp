@@ -887,6 +887,7 @@ export default function SourcingDetailPage() {
                             </div>
                             <AllocTable
                               allocs={d.sourcing_allocations}
+                              requiredQty={d.required_qty}
                               vendors={vendors}
                               options={d.product_id ? vendorOptions[d.product_id] ?? [] : []}
                               onAdd={(p) => addAlloc(d.id, p)}
@@ -961,6 +962,7 @@ export default function SourcingDetailPage() {
 
 function AllocTable({
   allocs,
+  requiredQty,
   vendors,
   options,
   onAdd,
@@ -969,6 +971,7 @@ function AllocTable({
   onDelete,
 }: {
   allocs: Alloc[];
+  requiredQty: number;
   vendors: Vendor[];
   options: VendorOption[];
   onAdd: (p: { vendor_id: string | null; vendor_label: string | null; order_qty: number; unit_price: number | null }) => void;
@@ -982,6 +985,13 @@ function AllocTable({
   const [qty, setQty] = useState("");
   const [price, setPrice] = useState("");
   const cheapestId = options.find((o) => o.available)?.vendor_id;
+  // 아직 거래처에 안 붙은 남은 필요수량(매번 손으로 안 치게 기본값으로)
+  const remaining = Math.max(0, requiredQty - allocs.reduce((s, a) => s + a.order_qty, 0));
+  const openForm = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !qty) setQty(String(remaining || requiredQty));
+  };
 
   const submit = () => {
     const isNew = vendorSel === "__new__";
@@ -1040,7 +1050,7 @@ function AllocTable({
 
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={openForm}
         className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800"
       >
         {allocs.length > 0 ? "거래처 바꾸기 · 추가" : "거래처 고르기"}
@@ -1059,8 +1069,9 @@ function AllocTable({
               onClick={() => {
                 setVendorSel(o.vendor_id);
                 setPrice(o.price != null ? String(o.price) : "");
+                if (!qty) setQty(String(remaining || requiredQty));
               }}
-              title={o.available ? "클릭하면 단가 자동입력" : "품절/중단"}
+              title={o.available ? "클릭하면 단가·수량 자동입력" : "품절/중단"}
               className={`px-2 py-1 rounded-md text-xs border transition ${
                 !o.available
                   ? "border-gray-200 text-gray-300 line-through cursor-not-allowed"

@@ -194,12 +194,12 @@ export async function POST(request: Request) {
   // 주문 이력(지점별 + 전지점) + 거래처가/공급상태 일괄 조회
   const histBranch: Record<string, { cnt: number; last: string | null }> = {};
   const histAll: Record<string, { cnt: number; last: string | null }> = {};
-  const priceMap: Record<string, { vendor: string; price: number | null }[]> = {};
+  const priceMap: Record<string, { vendor_id: string; vendor: string; price: number | null }[]> = {};
   try {
   if (matchedIds.length) {
     const [histRes, vpRes, vssRes] = await Promise.all([
       supabase.from("order_items").select("product_id, orders(order_date, branch_id)").in("product_id", matchedIds),
-      supabase.from("vendor_products").select("product_id, unit_price, vendor:vendors(name)").in("product_id", matchedIds),
+      supabase.from("vendor_products").select("product_id, unit_price, vendor:vendors(id, name)").in("product_id", matchedIds),
       supabase.from("vendor_supply_status").select("product_id, vendor:vendors(name)").in("product_id", matchedIds),
     ]);
     for (const r of (histRes.data as unknown as { product_id: string; orders: { order_date: string; branch_id: string | null } | null }[]) || []) {
@@ -218,10 +218,10 @@ export async function POST(request: Request) {
     for (const s of (vssRes.data as unknown as { product_id: string; vendor: { name: string } | null }[]) || []) {
       if (s.vendor?.name) blocked.add(`${s.product_id}:${s.vendor.name}`);
     }
-    for (const r of (vpRes.data as unknown as { product_id: string; unit_price: number | null; vendor: { name: string } | null }[]) || []) {
+    for (const r of (vpRes.data as unknown as { product_id: string; unit_price: number | null; vendor: { id: string; name: string } | null }[]) || []) {
       const vn = r.vendor?.name ?? "?";
       if (blocked.has(`${r.product_id}:${vn}`)) continue;
-      (priceMap[r.product_id] ||= []).push({ vendor: vn, price: r.unit_price });
+      (priceMap[r.product_id] ||= []).push({ vendor_id: r.vendor?.id ?? "", vendor: vn, price: r.unit_price });
     }
     for (const k in priceMap) priceMap[k].sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
   }
@@ -312,6 +312,7 @@ export async function POST(request: Request) {
       candidates: candidates.map((c) => ({ id: c.id, name: c.name, spec: c.spec })),
       product_id: autoMatch && top ? top.id : "",
       best_vendor: best ? best.vendor : null,
+      best_vendor_id: best && best.vendor_id ? best.vendor_id : null,
       best_price: best ? best.price : null,
       sourceable: top ? (priceMap[top.id]?.length ?? 0) > 0 : false,
     };

@@ -24,6 +24,7 @@ interface Line {
   candidates: Cand[];
   product_id: string;
   best_vendor: string | null;
+  best_vendor_id: string | null;
   best_price: number | null;
   sourceable: boolean;
 }
@@ -50,6 +51,7 @@ export default function ParseOrderPage() {
   const [requester, setRequester] = useState("");
   const [deliveryNote, setDeliveryNote] = useState("");
   const [creating, setCreating] = useState(false);
+  const [autoAssign, setAutoAssign] = useState(true);
 
   // 사람이 직접 제품을 DB에서 찾아 교정
   const [searchFor, setSearchFor] = useState<number | null>(null);
@@ -219,10 +221,41 @@ export default function ParseOrderPage() {
         purpose: l.purpose.trim() || null,
         sort_order: i,
       }));
-      const { error: dErr } = await supabase.from("demand_lines").insert(rows);
+      const { data: inserted, error: dErr } = await supabase
+        .from("demand_lines")
+        .insert(rows)
+        .select("id, sort_order");
       if (dErr) throw dErr;
 
-      toast.success("발주건 생성 완료");
+      // AI 추천 거래처로 자동 발주(켜둔 경우) — 매칭된 품목 + 추천 거래처가 있을 때만
+      let assignedCount = 0;
+      if (autoAssign && inserted) {
+        const allocRows = (inserted as { id: string; sort_order: number | null }[])
+          .map((row) => {
+            const l = valid[row.sort_order ?? -1];
+            if (!l || !l.product_id || !l.best_vendor_id) return null;
+            return {
+              demand_line_id: row.id,
+              vendor_id: l.best_vendor_id,
+              vendor_label: null,
+              order_qty: Number(l.quantity) || 0,
+              unit_price: l.best_price,
+              status: "ordered",
+            };
+          })
+          .filter((r): r is NonNullable<typeof r> => r !== null);
+        if (allocRows.length > 0) {
+          const { error: aErr } = await supabase.from("sourcing_allocations").insert(allocRows);
+          if (aErr) toast.error(`자동 배정 일부 실패: ${aErr.message}`);
+          else assignedCount = allocRows.length;
+        }
+      }
+
+      toast.success(
+        assignedCount > 0
+          ? `발주건 생성 완료 · ${assignedCount}건 추천 거래처로 자동 발주`
+          : "발주건 생성 완료"
+      );
       router.push(`/sourcing/${job.id}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "생성 오류");
@@ -428,6 +461,10 @@ export default function ParseOrderPage() {
               </select>
               <input value={requester} onChange={(e) => setRequester(e.target.value)} placeholder="요청처" className="px-3 py-2 border border-gray-200 rounded-lg text-sm" />
               <input value={deliveryNote} onChange={(e) => setDeliveryNote(e.target.value)} placeholder="배송 메모" className="px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+              <label className="sm:col-span-2 flex items-center gap-2 px-1 text-sm text-gray-700 cursor-pointer select-none">
+                <input type="checkbox" checked={autoAssign} onChange={(e) => setAutoAssign(e.target.checked)} className="cursor-pointer" />
+                AI 추천 거래처로 자동 발주 (매칭된 품목을 최저가·재고 있는 거래처로 바로 배정 — 소싱 화면에서 수정 가능)
+              </label>
               <button
                 onClick={create}
                 disabled={creating}
