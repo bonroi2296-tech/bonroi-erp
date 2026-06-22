@@ -175,6 +175,22 @@ export default function ParseOrderPage() {
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines((prev) => prev.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
+  // AI 추천(1순위 후보)을 미매칭 품목에 한 번에 적용
+  const applyRecommendations = () => {
+    let n = 0;
+    setLines((prev) =>
+      prev.map((l) => {
+        if (!l.product_id && l.candidates.length > 0) {
+          n += 1;
+          return { ...l, product_id: l.candidates[0].id };
+        }
+        return l;
+      })
+    );
+    toast.success(n > 0 ? `추천 ${n}건 적용` : "적용할 추천이 없습니다.");
+  };
+  const recommendable = lines.filter((l) => !l.product_id && l.candidates.length > 0).length;
+
   const create = async () => {
     const valid = lines.filter((l) => l.raw_name.trim());
     if (!title.trim()) return toast.error("발주건 제목을 입력하세요.");
@@ -283,7 +299,17 @@ export default function ParseOrderPage() {
         {lines.length > 0 && (
           <>
             <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <p className="text-sm font-medium text-gray-700 mb-3">추출 {lines.length}건 — 매칭·거래처를 AI가 제안. 확인/수정만 하세요.</p>
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <p className="text-sm font-medium text-gray-700">추출 {lines.length}건 — 매칭·거래처를 AI가 제안. 확인/수정만 하세요.</p>
+                {recommendable > 0 && (
+                  <button
+                    onClick={applyRecommendations}
+                    className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> 추천 일괄 적용 ({recommendable})
+                  </button>
+                )}
+              </div>
               <div className="space-y-3">
                 {lines.map((l, i) => (
                   <div key={i} className="border-b border-gray-100 pb-3 last:border-0">
@@ -330,6 +356,15 @@ export default function ParseOrderPage() {
                         ))}
                         <option value="__search__">+ 직접 검색…</option>
                       </select>
+                      {!l.product_id && l.candidates.length > 0 && (
+                        <button
+                          onClick={() => updateLine(i, { product_id: l.candidates[0].id })}
+                          title={`추천 적용: ${l.candidates[0].name}`}
+                          className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" /> 추천
+                        </button>
+                      )}
                       {l.reason && <span className="text-xs text-gray-400">{l.reason}</span>}
                       {l.product_id && l.best_vendor && (
                         <span className="text-xs text-emerald-700">
