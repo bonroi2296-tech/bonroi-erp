@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   LayoutDashboard, Package, ShoppingCart, Truck, Send,
-  FileText, BarChart3, Settings, X, TrendingDown, RotateCcw, ClipboardList, ShieldAlert, LogOut, PackageSearch, Menu,
+  FileText, BarChart3, Settings, X, TrendingDown, RotateCcw, ClipboardList, ShieldAlert, LogOut, PackageSearch, Menu, HelpCircle,
   type LucideIcon,
 } from "lucide-react";
 
@@ -27,6 +27,7 @@ const navItems: NavItem[] = [
   { href: "/returns", icon: RotateCcw, label: "반품 관리", hidden: true },
   { href: "/documents", icon: FileText, label: "문서 생성", hidden: true },
   { href: "/analytics", icon: BarChart3, label: "분석/리포트", hidden: true },
+  { href: "/guide", icon: HelpCircle, label: "사용 가이드" },
   { href: "/settings", icon: Settings, label: "설정" },
 ];
 

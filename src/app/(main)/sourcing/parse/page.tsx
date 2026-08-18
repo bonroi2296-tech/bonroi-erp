@@ -24,6 +24,7 @@ interface Line {
   candidates: Cand[];
   product_id: string;
   best_vendor: string | null;
+  best_vendor_id: string | null;
   best_price: number | null;
   sourceable: boolean;
 }
@@ -50,6 +51,7 @@ export default function ParseOrderPage() {
   const [requester, setRequester] = useState("");
   const [deliveryNote, setDeliveryNote] = useState("");
   const [creating, setCreating] = useState(false);
+  const [autoAssign, setAutoAssign] = useState(true);
 
   // 사람이 직접 제품을 DB에서 찾아 교정
   const [searchFor, setSearchFor] = useState<number | null>(null);
@@ -175,6 +177,22 @@ export default function ParseOrderPage() {
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines((prev) => prev.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
+  // AI 추천(1순위 후보)을 미매칭 품목에 한 번에 적용
+  const applyRecommendations = () => {
+    let n = 0;
+    setLines((prev) =>
+      prev.map((l) => {
+        if (!l.product_id && l.candidates.length > 0) {
+          n += 1;
+          return { ...l, product_id: l.candidates[0].id };
+        }
+        return l;
+      })
+    );
+    toast.success(n > 0 ? `추천 ${n}건 적용` : "적용할 추천이 없습니다.");
+  };
+  const recommendable = lines.filter((l) => !l.product_id && l.candidates.length > 0).length;
+
   const create = async () => {
     const valid = lines.filter((l) => l.raw_name.trim());
     if (!title.trim()) return toast.error("발주건 제목을 입력하세요.");
@@ -203,10 +221,41 @@ export default function ParseOrderPage() {
         purpose: l.purpose.trim() || null,
         sort_order: i,
       }));
-      const { error: dErr } = await supabase.from("demand_lines").insert(rows);
+      const { data: inserted, error: dErr } = await supabase
+        .from("demand_lines")
+        .insert(rows)
+        .select("id, sort_order");
       if (dErr) throw dErr;
 
-      toast.success("발주건 생성 완료");
+      // AI 추천 거래처로 자동 발주(켜둔 경우) — 매칭된 품목 + 추천 거래처가 있을 때만
+      let assignedCount = 0;
+      if (autoAssign && inserted) {
+        const allocRows = (inserted as { id: string; sort_order: number | null }[])
+          .map((row) => {
+            const l = valid[row.sort_order ?? -1];
+            if (!l || !l.product_id || !l.best_vendor_id) return null;
+            return {
+              demand_line_id: row.id,
+              vendor_id: l.best_vendor_id,
+              vendor_label: null,
+              order_qty: Number(l.quantity) || 0,
+              unit_price: l.best_price,
+              status: "ordered",
+            };
+          })
+          .filter((r): r is NonNullable<typeof r> => r !== null);
+        if (allocRows.length > 0) {
+          const { error: aErr } = await supabase.from("sourcing_allocations").insert(allocRows);
+          if (aErr) toast.error(`자동 배정 일부 실패: ${aErr.message}`);
+          else assignedCount = allocRows.length;
+        }
+      }
+
+      toast.success(
+        assignedCount > 0
+          ? `발주건 생성 완료 · ${assignedCount}건 추천 거래처로 자동 발주`
+          : "발주건 생성 완료"
+      );
       router.push(`/sourcing/${job.id}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "생성 오류");
@@ -283,7 +332,17 @@ export default function ParseOrderPage() {
         {lines.length > 0 && (
           <>
             <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <p className="text-sm font-medium text-gray-700 mb-3">추출 {lines.length}건 — 매칭·거래처를 AI가 제안. 확인/수정만 하세요.</p>
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <p className="text-sm font-medium text-gray-700">추출 {lines.length}건 — 매칭·거래처를 AI가 제안. 확인/수정만 하세요.</p>
+                {recommendable > 0 && (
+                  <button
+                    onClick={applyRecommendations}
+                    className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> 추천 일괄 적용 ({recommendable})
+                  </button>
+                )}
+              </div>
               <div className="space-y-3">
                 {lines.map((l, i) => (
                   <div key={i} className="border-b border-gray-100 pb-3 last:border-0">
@@ -330,6 +389,15 @@ export default function ParseOrderPage() {
                         ))}
                         <option value="__search__">+ 직접 검색…</option>
                       </select>
+                      {!l.product_id && l.candidates.length > 0 && (
+                        <button
+                          onClick={() => updateLine(i, { product_id: l.candidates[0].id })}
+                          title={`추천 적용: ${l.candidates[0].name}`}
+                          className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" /> 추천
+                        </button>
+                      )}
                       {l.reason && <span className="text-xs text-gray-400">{l.reason}</span>}
                       {l.product_id && l.best_vendor && (
                         <span className="text-xs text-emerald-700">
@@ -393,6 +461,10 @@ export default function ParseOrderPage() {
               </select>
               <input value={requester} onChange={(e) => setRequester(e.target.value)} placeholder="요청처" className="px-3 py-2 border border-gray-200 rounded-lg text-sm" />
               <input value={deliveryNote} onChange={(e) => setDeliveryNote(e.target.value)} placeholder="배송 메모" className="px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+              <label className="sm:col-span-2 flex items-center gap-2 px-1 text-sm text-gray-700 cursor-pointer select-none">
+                <input type="checkbox" checked={autoAssign} onChange={(e) => setAutoAssign(e.target.checked)} className="cursor-pointer" />
+                AI 추천 거래처로 자동 발주 (매칭된 품목을 최저가·재고 있는 거래처로 바로 배정 — 소싱 화면에서 수정 가능)
+              </label>
               <button
                 onClick={create}
                 disabled={creating}

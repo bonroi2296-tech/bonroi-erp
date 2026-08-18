@@ -156,6 +156,18 @@ export default function SourcingDetailPage() {
   };
   const [loading, setLoading] = useState(true);
 
+  // 거래처 일괄배정용 선택 상태
+  const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set());
+  const [bulkVendor, setBulkVendor] = useState("");
+  const toggleSelect = (lineId: string) => {
+    setSelectedLines((s) => {
+      const n = new Set(s);
+      if (n.has(lineId)) n.delete(lineId);
+      else n.add(lineId);
+      return n;
+    });
+  };
+
   // 품목(수요줄) 추가 폼
   const [newName, setNewName] = useState("");
   const [newQty, setNewQty] = useState("1");
@@ -312,6 +324,35 @@ export default function SourcingDetailPage() {
       status: "ordered",
     });
     if (error) return toast.error(error.message);
+    fetchJob();
+  };
+
+  // 선택한 여러 품목에 거래처를 한 번에 배정(수량=필요수량, 단가=거래처 추천가 자동)
+  const bulkAssignVendor = async () => {
+    if (!bulkVendor || !job) return;
+    const v = vendors.find((x) => x.id === bulkVendor);
+    if (!v) return;
+    const ids = Array.from(selectedLines);
+    if (ids.length === 0) return;
+    const rows = ids.map((did) => {
+      const d = job.demand_lines.find((x) => x.id === did);
+      const price = d?.product_id
+        ? (vendorOptions[d.product_id] ?? []).find((o) => o.vendor_id === bulkVendor)?.price ?? null
+        : null;
+      return {
+        demand_line_id: did,
+        vendor_id: bulkVendor,
+        vendor_label: null,
+        order_qty: d?.required_qty ?? 0,
+        unit_price: price,
+        status: "ordered",
+      };
+    });
+    const { error } = await supabase.from("sourcing_allocations").insert(rows);
+    if (error) return toast.error(error.message);
+    toast.success(`${rows.length}개 품목을 ${v.name}에 배정했어요. 수량·단가는 개별 수정 가능.`);
+    setSelectedLines(new Set());
+    setBulkVendor("");
     fetchJob();
   };
 
@@ -703,10 +744,55 @@ export default function SourcingDetailPage() {
             <Copy className="w-3.5 h-3.5" /> 병원용 변경 내역 복사
           </button>
         </div>
+        {selectedLines.size > 0 && (
+          <div className="flex flex-wrap items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-2">
+            <span className="text-sm font-medium text-blue-800">{selectedLines.size}개 품목 선택됨</span>
+            <select
+              value={bulkVendor}
+              onChange={(e) => setBulkVendor(e.target.value)}
+              className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              <option value="">거래처 선택</option>
+              {vendors.map((v) => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={bulkAssignVendor}
+              disabled={!bulkVendor}
+              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40"
+            >
+              <Plus className="w-3.5 h-3.5" /> 선택 품목에 일괄 배정
+            </button>
+            <button
+              onClick={() => setSelectedLines(new Set())}
+              className="text-xs text-gray-500 hover:text-gray-800"
+            >
+              선택 해제
+            </button>
+            <span className="w-full text-[11px] text-blue-700/80">
+              수량은 각 품목의 필요수량, 단가는 거래처 추천가로 채워집니다. 추가 후 개별 수정 가능.
+            </span>
+          </div>
+        )}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200 text-[11px] text-gray-500 uppercase">
+                <th className="w-8 px-2">
+                  <input
+                    type="checkbox"
+                    aria-label="전체 선택"
+                    checked={job.demand_lines.length > 0 && selectedLines.size === job.demand_lines.length}
+                    ref={(el) => {
+                      if (el) el.indeterminate = selectedLines.size > 0 && selectedLines.size < job.demand_lines.length;
+                    }}
+                    onChange={(e) =>
+                      setSelectedLines(e.target.checked ? new Set(job.demand_lines.map((d) => d.id)) : new Set())
+                    }
+                    className="align-middle cursor-pointer"
+                  />
+                </th>
                 <th className="w-6"></th>
                 <th className="text-left px-3 py-2">주문 제품(병원)</th>
                 <th className="text-right px-2 py-2 whitespace-nowrap">주문 수량</th>
@@ -737,6 +823,15 @@ export default function SourcingDetailPage() {
                       onClick={() => toggleExpand(d.id)}
                       className="cursor-pointer hover:bg-blue-50/40"
                     >
+                      <td className="px-2 text-center" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label="품목 선택"
+                          checked={selectedLines.has(d.id)}
+                          onChange={() => toggleSelect(d.id)}
+                          className="align-middle cursor-pointer"
+                        />
+                      </td>
                       <td className="px-2 text-gray-400 text-xs">{expanded ? "▾" : "▸"}</td>
                       <td className="px-3 py-1.5 text-xs text-gray-900 font-medium">{d.raw_name}</td>
                       <td className="px-2 py-1.5 text-right text-xs whitespace-nowrap">
@@ -767,7 +862,7 @@ export default function SourcingDetailPage() {
                     </tr>
                     {expanded && (
                       <tr>
-                        <td colSpan={7} className="bg-gray-50/70 px-4 py-3">
+                        <td colSpan={8} className="bg-gray-50/70 px-4 py-3">
                           <div className="space-y-3">
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
                               <span className="text-gray-500">발주 {ordered} · 확보 {secured} / 필요 {d.required_qty}</span>
@@ -792,6 +887,7 @@ export default function SourcingDetailPage() {
                             </div>
                             <AllocTable
                               allocs={d.sourcing_allocations}
+                              requiredQty={d.required_qty}
                               vendors={vendors}
                               options={d.product_id ? vendorOptions[d.product_id] ?? [] : []}
                               onAdd={(p) => addAlloc(d.id, p)}
@@ -866,6 +962,7 @@ export default function SourcingDetailPage() {
 
 function AllocTable({
   allocs,
+  requiredQty,
   vendors,
   options,
   onAdd,
@@ -874,6 +971,7 @@ function AllocTable({
   onDelete,
 }: {
   allocs: Alloc[];
+  requiredQty: number;
   vendors: Vendor[];
   options: VendorOption[];
   onAdd: (p: { vendor_id: string | null; vendor_label: string | null; order_qty: number; unit_price: number | null }) => void;
@@ -887,6 +985,13 @@ function AllocTable({
   const [qty, setQty] = useState("");
   const [price, setPrice] = useState("");
   const cheapestId = options.find((o) => o.available)?.vendor_id;
+  // 아직 거래처에 안 붙은 남은 필요수량(매번 손으로 안 치게 기본값으로)
+  const remaining = Math.max(0, requiredQty - allocs.reduce((s, a) => s + a.order_qty, 0));
+  const openForm = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !qty) setQty(String(remaining || requiredQty));
+  };
 
   const submit = () => {
     const isNew = vendorSel === "__new__";
@@ -945,7 +1050,7 @@ function AllocTable({
 
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={openForm}
         className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800"
       >
         {allocs.length > 0 ? "거래처 바꾸기 · 추가" : "거래처 고르기"}
@@ -964,8 +1069,9 @@ function AllocTable({
               onClick={() => {
                 setVendorSel(o.vendor_id);
                 setPrice(o.price != null ? String(o.price) : "");
+                if (!qty) setQty(String(remaining || requiredQty));
               }}
-              title={o.available ? "클릭하면 단가 자동입력" : "품절/중단"}
+              title={o.available ? "클릭하면 단가·수량 자동입력" : "품절/중단"}
               className={`px-2 py-1 rounded-md text-xs border transition ${
                 !o.available
                   ? "border-gray-200 text-gray-300 line-through cursor-not-allowed"
@@ -1324,7 +1430,13 @@ function ReconcileModal({
           {rows && (
             <>
               <p className="text-xs text-gray-500">
-                추출 {rows.length}건 · 매칭 {matchedCount}건 — 수량·단가·매칭을 확인하고 반영하세요.
+                추출 {rows.length}건 · 자동매칭 {matchedCount}건
+                {rows.length - matchedCount > 0 ? (
+                  <span className="text-amber-600 font-medium"> · 확인 필요 {rows.length - matchedCount}건(주황칸)</span>
+                ) : (
+                  <span className="text-emerald-600 font-medium"> · 모두 매칭됨</span>
+                )}
+                {" "}— 수량·단가를 확인하고 반영하세요.
               </p>
               <div className="space-y-2">
                 {rows.map((r, i) => (

@@ -43,6 +43,38 @@ export default function OrderHistoryPage() {
   const [categoryFilter, setCategoryFilter] = useState<"" | "양방" | "한방">("");
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(true);
+  const [showVendorPivot, setShowVendorPivot] = useState(false);
+
+  // 마지막으로 쓴 필터를 기억(매번 다시 설정 안 하도록)
+  const [filtersRestored, setFiltersRestored] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("order-history-filters");
+      if (raw) {
+        const f = JSON.parse(raw);
+        if (typeof f.dateFrom === "string") setDateFrom(f.dateFrom);
+        if (typeof f.dateTo === "string") setDateTo(f.dateTo);
+        if (typeof f.branchFilter === "string") setBranchFilter(f.branchFilter);
+        if (typeof f.vendorFilter === "string") setVendorFilter(f.vendorFilter);
+        if (f.categoryFilter === "양방" || f.categoryFilter === "한방") setCategoryFilter(f.categoryFilter);
+        if (typeof f.searchQuery === "string") setSearchQuery(f.searchQuery);
+      }
+    } catch {
+      /* 저장된 필터 없음/손상 — 무시 */
+    }
+    setFiltersRestored(true);
+  }, []);
+  useEffect(() => {
+    if (!filtersRestored) return;
+    try {
+      localStorage.setItem(
+        "order-history-filters",
+        JSON.stringify({ dateFrom, dateTo, branchFilter, vendorFilter, categoryFilter, searchQuery })
+      );
+    } catch {
+      /* 저장 실패 무시 */
+    }
+  }, [filtersRestored, dateFrom, dateTo, branchFilter, vendorFilter, categoryFilter, searchQuery]);
 
   // 정렬
   const [sortField, setSortField] = useState<keyof OrderHistoryRow>("order_date");
@@ -159,6 +191,23 @@ export default function OrderHistoryPage() {
     const totalSupply = filteredRows.reduce((s, r) => s + r.total_supply, 0);
     const totalMargin = filteredRows.reduce((s, r) => s + r.margin, 0);
     return { count: filteredRows.length, totalPurchase, totalSupply, totalMargin };
+  }, [filteredRows]);
+
+  // 거래처별 요약(현재 필터 기준) — 매입 큰 순
+  const vendorSummary = useMemo(() => {
+    const map = new Map<string, { count: number; purchase: number; supply: number; margin: number }>();
+    for (const r of filteredRows) {
+      const k = r.vendor_name || "(미지정)";
+      const cur = map.get(k) || { count: 0, purchase: 0, supply: 0, margin: 0 };
+      cur.count += 1;
+      cur.purchase += r.total_purchase;
+      cur.supply += r.total_supply;
+      cur.margin += r.margin;
+      map.set(k, cur);
+    }
+    return Array.from(map.entries())
+      .map(([vendor, v]) => ({ vendor, ...v }))
+      .sort((a, b) => b.purchase - a.purchase);
   }, [filteredRows]);
 
   const toggleSort = (field: keyof OrderHistoryRow) => {
@@ -370,6 +419,57 @@ export default function OrderHistoryPage() {
               {formatPrice(summary.totalMargin)}
             </p>
           </div>
+        </div>
+
+        {/* 거래처별 요약 */}
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <button
+            onClick={() => setShowVendorPivot((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <span>거래처별 요약 ({vendorSummary.length}곳)</span>
+            {showVendorPivot ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+          {showVendorPivot && (
+            <div className="overflow-x-auto border-t border-gray-100">
+              {vendorSummary.length === 0 ? (
+                <div className="p-6 text-center text-gray-400 text-sm">데이터 없음</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200 text-[11px] text-gray-500 uppercase">
+                      <th className="text-left px-3 py-2 whitespace-nowrap">거래처</th>
+                      <th className="text-right px-2 py-2 whitespace-nowrap">건수</th>
+                      <th className="text-right px-2 py-2 whitespace-nowrap">총매입가</th>
+                      <th className="text-right px-2 py-2 whitespace-nowrap">총납품가</th>
+                      <th className="text-right px-2 py-2 whitespace-nowrap">마진</th>
+                      <th className="text-right px-3 py-2 whitespace-nowrap">마진율</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {vendorSummary.map((v) => (
+                      <tr key={v.vendor} className="hover:bg-blue-50/40 transition-colors">
+                        <td className="px-3 py-1.5 whitespace-nowrap">
+                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${vendorColor(v.vendor)}`}>
+                            {v.vendor}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 text-right text-gray-600 text-xs">{v.count.toLocaleString()}</td>
+                        <td className="px-2 py-1.5 text-right text-gray-700 text-xs">{formatPrice(v.purchase)}</td>
+                        <td className="px-2 py-1.5 text-right text-gray-700 text-xs">{formatPrice(v.supply)}</td>
+                        <td className={`px-2 py-1.5 text-right font-medium text-xs ${v.margin > 0 ? "text-emerald-600" : v.margin < 0 ? "text-red-600" : "text-gray-400"}`}>
+                          {formatPrice(v.margin)}
+                        </td>
+                        <td className="px-3 py-1.5 text-right text-gray-500 text-xs">
+                          {v.supply ? `${(((v.supply - v.purchase) / v.supply) * 100).toFixed(1)}%` : "-"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
         </div>
 
         {/* 테이블 */}
