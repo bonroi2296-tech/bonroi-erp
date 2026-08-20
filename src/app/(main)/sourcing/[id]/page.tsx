@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import TopBar from "@/components/TopBar";
@@ -145,6 +145,9 @@ export default function SourcingDetailPage() {
   const [vendorOptions, setVendorOptions] = useState<Record<string, VendorOption[]>>({});
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [reconcileFor, setReconcileFor] = useState<VendorGroup | null>(null);
+  // 완료 처리 중인 거래처(연타 방지). ref 는 즉시 반영돼 같은 클릭 묶음도 막는다.
+  const [completing, setCompleting] = useState<Set<string>>(new Set());
+  const completingRef = useRef<Set<string>>(new Set());
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const toggleExpand = (id: string) => {
     setExpandedRows((s) => {
@@ -425,7 +428,19 @@ export default function SourcingDetailPage() {
   // 거래처 "완료" → 주문 내역(orders/order_items)에 반영, "완료 취소" → 제거.
   // toast/refetch 없이 DB만 처리(applyReconcile 와 완료 버튼이 공유). 최신 할당을 다시 읽어 실제 수량으로 구성.
   const writeVendorOrder = async (g: VendorGroup, complete: boolean, fee: number) => {
-    const existing = settlementOf(g);
+    // 화면에 들고 있는 값이 아니라 DB에서 다시 읽는다.
+    // 완료 버튼이 연달아 눌리면 화면 값은 아직 비어 있어서 "이전 주문 없음"으로 판단하고
+    // 지우지 않은 채 새 주문을 또 만든다(실제로 2026-08-18 에 같은 주문이 3건 생겼다).
+    const base = supabase.from("sourcing_settlements").select("id, order_id").eq("job_id", id);
+    const { data: freshRows } = await (g.vendor_id
+      ? base.eq("vendor_id", g.vendor_id)
+      : g.vendor_label
+      ? base.eq("vendor_label", g.vendor_label)
+      : base.is("vendor_label", null));
+    const fresh = (freshRows as { id: string; order_id: string | null }[] | null) ?? [];
+    // 주문이 붙어 있는 행을 우선(그 주문을 지워야 한다)
+    const existing = fresh.find((r) => r.order_id) ?? fresh[0] ?? null;
+
     // 이전에 생성한 주문이 있으면 먼저 제거(order_items 는 ON DELETE CASCADE)
     if (existing?.order_id) {
       await supabase.from("orders").delete().eq("id", existing.order_id);
@@ -534,14 +549,22 @@ export default function SourcingDetailPage() {
     }
   };
 
-  // 완료 버튼 핸들러(피드백 + 새로고침 포함)
+  // 완료 버튼 핸들러(피드백 + 새로고침 포함).
+  // 처리 중인 거래처는 다시 못 누르게 잠근다 — 연타로 주문이 여러 건 생기는 걸 막는 1차 방어.
   const toggleComplete = async (g: VendorGroup, complete: boolean, fee: number) => {
+    const key = g.vendor_id ?? g.vendor_label ?? "";
+    if (completingRef.current.has(key)) return;
+    completingRef.current.add(key);
+    setCompleting(new Set(completingRef.current));
     try {
       await writeVendorOrder(g, complete, fee);
       toast.success(complete ? `${g.name} 완료 — 주문 내역에 올렸어요.` : `${g.name} 완료를 취소했어요.`);
       fetchJob();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "처리 중 오류");
+    } finally {
+      completingRef.current.delete(key);
+      setCompleting(new Set(completingRef.current));
     }
   };
 
@@ -719,6 +742,7 @@ export default function SourcingDetailPage() {
                   autoFee={autoShip(g)}
                   onSaveShip={(fee) => upsertSettlement(g, { shipping_fee: fee })}
                   onComplete={(v) => toggleComplete(g, v, shipOf(g))}
+                  busy={completing.has(g.vendor_id ?? g.vendor_label ?? "")}
                   onReconcile={() => setReconcileFor(g)}
                 />
               ))}
@@ -1145,6 +1169,7 @@ function VendorOrderCard({
   autoFee,
   onSaveShip,
   onComplete,
+  busy,
   onReconcile,
 }: {
   group: VendorGroup;
@@ -1152,6 +1177,7 @@ function VendorOrderCard({
   autoFee: number;
   onSaveShip: (fee: number) => void;
   onComplete: (v: boolean) => void;
+  busy: boolean;
   onReconcile: () => void;
 }) {
   const toast = useToast();
@@ -1252,18 +1278,20 @@ function VendorOrderCard({
           {done ? (
             <button
               onClick={() => onComplete(false)}
-              className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-md text-xs text-gray-500 hover:bg-gray-50"
+              disabled={busy}
+              className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-md text-xs text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               title="완료를 취소하고 주문 내역에서 내립니다"
             >
-              완료 취소
+              {busy ? "처리 중…" : "완료 취소"}
             </button>
           ) : (
             <button
               onClick={() => onComplete(true)}
-              className="flex items-center gap-1 px-3 py-1 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+              disabled={busy}
+              className="flex items-center gap-1 px-3 py-1 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
               title="이 거래처 발주를 완료하고 주문 내역에 올립니다"
             >
-              <CheckCircle2 className="w-3.5 h-3.5" /> 완료
+              <CheckCircle2 className="w-3.5 h-3.5" /> {busy ? "처리 중…" : "완료"}
             </button>
           )}
         </div>
