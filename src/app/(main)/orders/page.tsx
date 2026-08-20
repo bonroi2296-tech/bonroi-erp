@@ -73,7 +73,8 @@ interface Vendor {
 interface VendorPrice {
   vendor_id: string;
   vendor_name: string;
-  unit_price: number;
+  // null = 취급하지만 단가 미확인. 화면에는 "/" 로 보이고 자동입력하지 않는다.
+  unit_price: number | null;
 }
 
 interface NewOrderItem {
@@ -300,7 +301,7 @@ export default function OrdersPage() {
       (data || []).map((d: Record<string, unknown>) => ({
         vendor_id: d.vendor_id as string,
         vendor_name: ((d.vendor as Record<string, string>)?.name) || "",
-        unit_price: d.unit_price as number,
+        unit_price: (d.unit_price as number | null) ?? null,
       }))
     );
   };
@@ -309,7 +310,8 @@ export default function OrdersPage() {
   const handleVendorSelect = (vendorId: string) => {
     setAddVendorId(vendorId);
     const vp = vendorPrices.find((v) => v.vendor_id === vendorId);
-    if (vp) setAddPurchasePrice(vp.unit_price);
+    // 단가 미확인(null)이면 자동입력하지 않고 사용자가 직접 넣게 둔다.
+    if (vp?.unit_price != null) setAddPurchasePrice(vp.unit_price);
   };
 
   // 품목 추가
@@ -837,7 +839,7 @@ export default function OrdersPage() {
                               : "border-gray-200 text-gray-600 hover:bg-gray-50"
                           }`}
                         >
-                          {vp.vendor_name} · ₩{vp.unit_price.toLocaleString()}
+                          {vp.vendor_name} · {vp.unit_price != null ? `₩${vp.unit_price.toLocaleString()}` : "/"}
                         </button>
                       ))}
                     </div>

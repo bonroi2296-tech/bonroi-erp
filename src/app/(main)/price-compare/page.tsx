@@ -7,8 +7,20 @@ import { Search, ArrowUpDown, TrendingDown, AlertTriangle, X, Plus, Pencil, Tras
 
 interface VendorPrice {
   vendor_name: string;
-  unit_price: number;
+  unit_price: number | null;
 }
+
+// 단가 미확인 표시. 화면·입력 모두 이 문자를 쓴다(취급은 하는데 값을 아직 모름 = DB unit_price null).
+const UNKNOWN_MARK = "/";
+
+// 입력칸 문자열 해석. "/" = 단가 미확인(행은 남기고 null), 빈칸 = 취급 안 함(행 삭제).
+const parseVendorPriceInput = (raw: string | undefined): { unknown: boolean; price: number | null } => {
+  const s = (raw ?? "").trim();
+  if (s === UNKNOWN_MARK) return { unknown: true, price: null };
+  if (s === "") return { unknown: false, price: null };
+  const n = parseInt(s.replace(/[,₩\s]/g, ""), 10);
+  return { unknown: false, price: Number.isNaN(n) ? null : n };
+};
 
 interface ProductWithPrices {
   id: string;
@@ -17,6 +29,8 @@ interface ProductWithPrices {
   category: string | null;
   supply_price: number | null;
   vendors: Record<string, number | null>;
+  // 취급은 하는데 단가를 모르는 거래처. vendors 가 null 인 것과 구분해 "/" 로 보여준다.
+  vendorsUnknown: Record<string, boolean>;
   lowest_price: number | null;
   lowest_vendor: string | null;
   price_diff_pct: number | null;
@@ -79,7 +93,12 @@ export default function PriceComparePage() {
     const vp: Record<string, string> = {};
     const vendorList = product.category === "양방" ? YANGBANG_VENDORS : HANBANG_VENDORS;
     vendorList.forEach((v) => {
-      vp[v] = product.vendors[v] != null ? String(product.vendors[v]) : "";
+      vp[v] =
+        product.vendors[v] != null
+          ? String(product.vendors[v])
+          : product.vendorsUnknown?.[v]
+          ? UNKNOWN_MARK
+          : "";
     });
     setFormData({
       name: product.name,
@@ -128,24 +147,25 @@ export default function PriceComparePage() {
 
       // 벤더 단가 입력
       for (const vendorName of vendorList) {
-        const priceStr = formData.vendorPrices[vendorName];
-        if (priceStr && priceStr.trim() !== "") {
-          const price = parseInt(priceStr.replace(/[,₩\s]/g, ""), 10);
-          if (!isNaN(price) && vendorIdMap[vendorName]) {
-            await supabase.from("vendor_products").insert({
-              product_id: newProduct.id,
-              vendor_id: vendorIdMap[vendorName],
-              unit_price: price,
-            });
-          }
+        const { unknown, price } = parseVendorPriceInput(formData.vendorPrices[vendorName]);
+        const vId = vendorIdMap[vendorName];
+        if (!vId) continue;
+        if (unknown || price !== null) {
+          await supabase.from("vendor_products").insert({
+            product_id: newProduct.id,
+            vendor_id: vId,
+            unit_price: unknown ? null : price,
+          });
         }
       }
 
       // 로컬 상태에 추가
       const vendorMap: Record<string, number | null> = {};
+      const unknownMap: Record<string, boolean> = {};
       vendorList.forEach((v) => {
-        const p = formData.vendorPrices[v];
-        vendorMap[v] = p && p.trim() !== "" ? parseInt(p.replace(/[,₩\s]/g, ""), 10) || null : null;
+        const { unknown, price } = parseVendorPriceInput(formData.vendorPrices[v]);
+        vendorMap[v] = price;
+        if (unknown) unknownMap[v] = true;
       });
       const prices = Object.values(vendorMap).filter((v): v is number => v !== null);
       const lowestPrice = prices.length > 0 ? Math.min(...prices) : null;
@@ -155,7 +175,7 @@ export default function PriceComparePage() {
 
       setProducts((prev) => [...prev, {
         id: newProduct.id, name: newProduct.name, spec: newProduct.spec, category: newProduct.category,
-        supply_price: supplyPrice, vendors: vendorMap, lowest_price: lowestPrice, lowest_vendor: lowestVendor, price_diff_pct: priceDiffPct,
+        supply_price: supplyPrice, vendors: vendorMap, vendorsUnknown: unknownMap, lowest_price: lowestPrice, lowest_vendor: lowestVendor, price_diff_pct: priceDiffPct,
       }]);
 
     } else if (editingProduct) {
@@ -168,19 +188,19 @@ export default function PriceComparePage() {
 
       // 벤더 단가 업데이트
       for (const vendorName of vendorList) {
-        const priceStr = formData.vendorPrices[vendorName];
-        const newPrice = priceStr && priceStr.trim() !== "" ? parseInt(priceStr.replace(/[,₩\s]/g, ""), 10) : null;
+        const { unknown, price } = parseVendorPriceInput(formData.vendorPrices[vendorName]);
         const vId = vendorIdMap[vendorName];
         if (!vId) continue;
 
         const { data: existing } = await supabase
           .from("vendor_products").select("id").eq("product_id", editingProduct.id).eq("vendor_id", vId).maybeSingle();
 
-        if (newPrice !== null && !isNaN(newPrice)) {
+        if (unknown || price !== null) {
+          const value = unknown ? null : price;
           if (existing) {
-            await supabase.from("vendor_products").update({ unit_price: newPrice, last_updated: new Date().toISOString() }).eq("id", existing.id);
+            await supabase.from("vendor_products").update({ unit_price: value, last_updated: new Date().toISOString() }).eq("id", existing.id);
           } else {
-            await supabase.from("vendor_products").insert({ product_id: editingProduct.id, vendor_id: vId, unit_price: newPrice });
+            await supabase.from("vendor_products").insert({ product_id: editingProduct.id, vendor_id: vId, unit_price: value });
           }
         } else if (existing) {
           await supabase.from("vendor_products").delete().eq("id", existing.id);
@@ -189,9 +209,11 @@ export default function PriceComparePage() {
 
       // 로컬 상태 업데이트
       const vendorMap: Record<string, number | null> = {};
+      const unknownMap: Record<string, boolean> = {};
       vendorList.forEach((v) => {
-        const p = formData.vendorPrices[v];
-        vendorMap[v] = p && p.trim() !== "" ? parseInt(p.replace(/[,₩\s]/g, ""), 10) || null : null;
+        const { unknown, price } = parseVendorPriceInput(formData.vendorPrices[v]);
+        vendorMap[v] = price;
+        if (unknown) unknownMap[v] = true;
       });
       const prices = Object.values(vendorMap).filter((v): v is number => v !== null);
       const lowestPrice = prices.length > 0 ? Math.min(...prices) : null;
@@ -201,7 +223,7 @@ export default function PriceComparePage() {
 
       setProducts((prev) => prev.map((p) =>
         p.id === editingProduct.id
-          ? { ...p, name: formData.name.trim(), spec: formData.spec.trim(), supply_price: supplyPrice, vendors: vendorMap, lowest_price: lowestPrice, lowest_vendor: lowestVendor, price_diff_pct: priceDiffPct }
+          ? { ...p, name: formData.name.trim(), spec: formData.spec.trim(), supply_price: supplyPrice, vendors: vendorMap, vendorsUnknown: unknownMap, lowest_price: lowestPrice, lowest_vendor: lowestVendor, price_diff_pct: priceDiffPct }
           : p
       ));
     }
@@ -257,7 +279,8 @@ export default function PriceComparePage() {
           if (!vendorPriceMap[vp.product_id]) vendorPriceMap[vp.product_id] = [];
           vendorPriceMap[vp.product_id].push({
             vendor_name: vendorName,
-            unit_price: vp.unit_price ?? 0,
+            // null 을 0 으로 바꾸면 "최저가"로 잡혀 자동배정까지 오염된다. 그대로 둔다.
+            unit_price: vp.unit_price,
           });
         }
       }
@@ -280,18 +303,23 @@ export default function PriceComparePage() {
       const result: ProductWithPrices[] = productsData.map((p) => {
         const priceEntries = vendorPriceMap[p.id] || [];
         const vendorMap: Record<string, number | null> = {};
+        const unknownMap: Record<string, boolean> = {};
         vendorList.forEach((v) => (vendorMap[v] = null));
 
         let lowestPrice: number | null = null;
         let lowestVendor: string | null = null;
 
         for (const entry of priceEntries) {
-          if (vendorList.includes(entry.vendor_name)) {
-            vendorMap[entry.vendor_name] = entry.unit_price;
-            if (lowestPrice === null || entry.unit_price < lowestPrice) {
-              lowestPrice = entry.unit_price;
-              lowestVendor = entry.vendor_name;
-            }
+          if (!vendorList.includes(entry.vendor_name)) continue;
+          // 단가 미확인은 최저가 경쟁에서 빼고 "/" 로만 표시한다.
+          if (entry.unit_price === null) {
+            unknownMap[entry.vendor_name] = true;
+            continue;
+          }
+          vendorMap[entry.vendor_name] = entry.unit_price;
+          if (lowestPrice === null || entry.unit_price < lowestPrice) {
+            lowestPrice = entry.unit_price;
+            lowestVendor = entry.vendor_name;
           }
         }
 
@@ -311,6 +339,7 @@ export default function PriceComparePage() {
           category: p.category,
           supply_price: p.supply_price,
           vendors: vendorMap,
+          vendorsUnknown: unknownMap,
           lowest_price: lowestPrice,
           lowest_vendor: lowestVendor,
           price_diff_pct: priceDiffPct,
@@ -692,13 +721,17 @@ export default function PriceComparePage() {
                         </td>
                         {currentVendors.map((v) => {
                           const price = p.vendors[v] ?? null;
+                          const unknown = price === null && p.vendorsUnknown?.[v] === true;
                           const isLowest = price !== null && price === minPrice;
                           return (
                             <td
                               key={v}
+                              title={unknown ? "취급하지만 단가 미확인" : undefined}
                               className={`px-2 md:px-3 py-2 md:py-2.5 text-right whitespace-nowrap ${
                                 isLowest
                                   ? "text-emerald-700 font-bold bg-emerald-50/50"
+                                  : unknown
+                                  ? "text-amber-600 font-medium"
                                   : price === null
                                   ? "text-gray-300"
                                   : "text-gray-600"
@@ -709,6 +742,8 @@ export default function PriceComparePage() {
                                   {formatPrice(price)}
                                   {isLowest && <span className="text-[10px] ml-0.5">✓</span>}
                                 </span>
+                              ) : unknown ? (
+                                UNKNOWN_MARK
                               ) : (
                                 "-"
                               )}
@@ -1032,6 +1067,9 @@ export default function PriceComparePage() {
               {/* 벤더별 단가 */}
               <div className="space-y-3">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">벤더별 매입 단가</p>
+                <p className="text-[11px] text-gray-400">
+                  단가를 아직 모르면 <span className="font-medium text-amber-600">{UNKNOWN_MARK}</span> 를 넣으세요. 비워두면 그 거래처는 취급 안 하는 것으로 저장됩니다.
+                </p>
                 <div className="grid grid-cols-1 gap-2">
                   {(category === "양방" ? YANGBANG_VENDORS : HANBANG_VENDORS).map((v) => (
                     <div key={v} className="flex items-center gap-3">
