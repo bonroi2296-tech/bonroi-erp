@@ -120,6 +120,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "demand_lines_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "v_allocation_price_check"
+            referencedColumns: ["job_id"]
+          },
+          {
             foreignKeyName: "demand_lines_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: false
@@ -246,57 +253,75 @@ export type Database = {
       }
       order_items: {
         Row: {
+          billed_amount: number | null
           confirmed_qty: number | null
           created_at: string | null
           edi_code: string | null
           id: string
           item_status: string | null
           margin: number | null
+          margin_old: number | null
           order_id: string
           product_id: string | null
           purchase_price: number | null
+          purchase_supply: number | null
+          purchase_vat: number | null
           quantity: number
           raw_product_name: string | null
           shipped_qty: number | null
           supply_price: number | null
+          supply_vat: number | null
           total_purchase: number | null
           total_supply: number | null
+          total_supply_raw: number | null
           vendor_id: string | null
         }
         Insert: {
+          billed_amount?: number | null
           confirmed_qty?: number | null
           created_at?: string | null
           edi_code?: string | null
           id?: string
           item_status?: string | null
           margin?: number | null
+          margin_old?: number | null
           order_id: string
           product_id?: string | null
           purchase_price?: number | null
+          purchase_supply?: number | null
+          purchase_vat?: number | null
           quantity: number
           raw_product_name?: string | null
           shipped_qty?: number | null
           supply_price?: number | null
+          supply_vat?: number | null
           total_purchase?: number | null
           total_supply?: number | null
+          total_supply_raw?: number | null
           vendor_id?: string | null
         }
         Update: {
+          billed_amount?: number | null
           confirmed_qty?: number | null
           created_at?: string | null
           edi_code?: string | null
           id?: string
           item_status?: string | null
           margin?: number | null
+          margin_old?: number | null
           order_id?: string
           product_id?: string | null
           purchase_price?: number | null
+          purchase_supply?: number | null
+          purchase_vat?: number | null
           quantity?: number
           raw_product_name?: string | null
           shipped_qty?: number | null
           supply_price?: number | null
+          supply_vat?: number | null
           total_purchase?: number | null
           total_supply?: number | null
+          total_supply_raw?: number | null
           vendor_id?: string | null
         }
         Relationships: [
@@ -372,9 +397,13 @@ export type Database = {
           order_number: string | null
           shipped_at: string | null
           status: string | null
+          total_billed: number | null
           total_margin: number | null
+          total_margin_old: number | null
           total_purchase_amount: number | null
+          total_purchase_supply: number | null
           total_supply_amount: number | null
+          total_supply_vat: number | null
           vendor_name: string | null
         }
         Insert: {
@@ -390,9 +419,13 @@ export type Database = {
           order_number?: string | null
           shipped_at?: string | null
           status?: string | null
+          total_billed?: number | null
           total_margin?: number | null
+          total_margin_old?: number | null
           total_purchase_amount?: number | null
+          total_purchase_supply?: number | null
           total_supply_amount?: number | null
+          total_supply_vat?: number | null
           vendor_name?: string | null
         }
         Update: {
@@ -408,9 +441,13 @@ export type Database = {
           order_number?: string | null
           shipped_at?: string | null
           status?: string | null
+          total_billed?: number | null
           total_margin?: number | null
+          total_margin_old?: number | null
           total_purchase_amount?: number | null
+          total_purchase_supply?: number | null
           total_supply_amount?: number | null
+          total_supply_vat?: number | null
           vendor_name?: string | null
         }
         Relationships: [
@@ -860,6 +897,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "sourcing_settlements_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "v_allocation_price_check"
+            referencedColumns: ["job_id"]
+          },
+          {
             foreignKeyName: "sourcing_settlements_order_id_fkey"
             columns: ["order_id"]
             isOneToOne: false
@@ -877,7 +921,10 @@ export type Database = {
       }
       vendor_products: {
         Row: {
+          excluded_note: string | null
+          excluded_since: string | null
           id: string
+          is_excluded: boolean
           is_lowest: boolean | null
           last_updated: string | null
           product_id: string
@@ -885,7 +932,10 @@ export type Database = {
           vendor_id: string
         }
         Insert: {
+          excluded_note?: string | null
+          excluded_since?: string | null
           id?: string
+          is_excluded?: boolean
           is_lowest?: boolean | null
           last_updated?: string | null
           product_id: string
@@ -893,7 +943,10 @@ export type Database = {
           vendor_id: string
         }
         Update: {
+          excluded_note?: string | null
+          excluded_since?: string | null
           id?: string
+          is_excluded?: boolean
           is_lowest?: boolean | null
           last_updated?: string | null
           product_id?: string
@@ -1015,7 +1068,22 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      v_allocation_price_check: {
+        Row: {
+          assigned_price: number | null
+          assigned_vendor: string | null
+          best_price: number | null
+          best_vendor: string | null
+          diff_amount: number | null
+          item: string | null
+          job_created: string | null
+          job_id: string | null
+          line_no: number | null
+          qty: number | null
+          status: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       get_dashboard_stats: { Args: never; Returns: Json }

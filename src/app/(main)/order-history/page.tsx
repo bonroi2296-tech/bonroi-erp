@@ -14,10 +14,14 @@ interface OrderHistoryRow {
   category: string;
   raw_product_name: string;
   quantity: number;
+  // 매입가는 부가세 포함, 납품가는 부가세 별도가 기준이다.
   purchase_price: number;
   total_purchase: number;
+  purchase_supply: number;
   supply_price: number;
   total_supply: number;
+  supply_vat: number;
+  billed_amount: number;
   margin: number;
   edi_code: string;
 }
@@ -96,7 +100,7 @@ export default function OrderHistoryPage() {
       .select(`
         order_date, vendor_name, category,
         branches!inner(short_name),
-        order_items(id, raw_product_name, quantity, purchase_price, total_purchase, supply_price, total_supply, margin, edi_code)
+        order_items(id, raw_product_name, quantity, purchase_price, total_purchase, purchase_supply, supply_price, total_supply, supply_vat, billed_amount, margin, edi_code)
       `)
       .order("order_date", { ascending: false });
 
@@ -114,8 +118,11 @@ export default function OrderHistoryPage() {
           quantity: number;
           purchase_price: number;
           total_purchase: number;
+          purchase_supply: number | null;
           supply_price: number;
           total_supply: number;
+          supply_vat: number | null;
+          billed_amount: number | null;
           margin: number;
           edi_code: string;
         }> }).order_items || [];
@@ -133,8 +140,11 @@ export default function OrderHistoryPage() {
             quantity: item.quantity,
             purchase_price: item.purchase_price || 0,
             total_purchase: item.total_purchase || 0,
+            purchase_supply: item.purchase_supply || 0,
             supply_price: item.supply_price || 0,
             total_supply: item.total_supply || 0,
+            supply_vat: item.supply_vat || 0,
+            billed_amount: item.billed_amount || 0,
             margin: item.margin || 0,
             edi_code: item.edi_code || "",
           });
@@ -188,9 +198,20 @@ export default function OrderHistoryPage() {
   // 요약 통계
   const summary = useMemo(() => {
     const totalPurchase = filteredRows.reduce((s, r) => s + r.total_purchase, 0);
+    const totalPurchaseSupply = filteredRows.reduce((s, r) => s + r.purchase_supply, 0);
     const totalSupply = filteredRows.reduce((s, r) => s + r.total_supply, 0);
+    const totalSupplyVat = filteredRows.reduce((s, r) => s + r.supply_vat, 0);
+    const totalBilled = filteredRows.reduce((s, r) => s + r.billed_amount, 0);
     const totalMargin = filteredRows.reduce((s, r) => s + r.margin, 0);
-    return { count: filteredRows.length, totalPurchase, totalSupply, totalMargin };
+    return {
+      count: filteredRows.length,
+      totalPurchase,
+      totalPurchaseSupply,
+      totalSupply,
+      totalSupplyVat,
+      totalBilled,
+      totalMargin,
+    };
   }, [filteredRows]);
 
   // 거래처별 요약(현재 필터 기준) — 매입 큰 순
@@ -238,15 +259,16 @@ export default function OrderHistoryPage() {
     return `${y}.${m}.${day}`;
   };
 
+  // 마진율은 마진 금액과 같은 기준(둘 다 부가세 뺀 공급가액)으로 계산해야 화면에서 앞뒤가 맞는다.
   const marginRate = (r: OrderHistoryRow) => {
-    if (!r.total_supply || !r.total_purchase) return "-";
-    const rate = ((r.total_supply - r.total_purchase) / r.total_supply) * 100;
-    return `${rate.toFixed(1)}%`;
+    if (!r.total_supply) return "-";
+    return `${((r.margin / r.total_supply) * 100).toFixed(1)}%`;
   };
 
   // CSV 다운로드
   const downloadCSV = () => {
-    const header = "날짜,지점,구분,거래처,제품(규격),수량,매입가,총매입가,납품가,총납품가,마진,마진율,EDI코드\n";
+    const header =
+      "날짜,지점,구분,거래처,제품(규격),수량,매입가(부가세포함),총매입가,매입공급가액,납품가,공급가액,부가세,청구액,마진,마진율,EDI코드\n";
     const body = filteredRows
       .map((r) =>
         [
@@ -258,8 +280,11 @@ export default function OrderHistoryPage() {
           r.quantity,
           r.purchase_price,
           r.total_purchase,
+          r.purchase_supply,
           r.supply_price,
           r.total_supply,
+          r.supply_vat,
+          r.billed_amount,
           r.margin,
           marginRate(r),
           r.edi_code,
@@ -400,23 +425,35 @@ export default function OrderHistoryPage() {
         )}
 
         {/* 요약 카드 */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <div className="bg-white rounded-xl border border-gray-200 p-3">
             <p className="text-[11px] text-gray-500">건수</p>
             <p className="text-lg font-bold text-gray-900">{summary.count.toLocaleString()}</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-3">
-            <p className="text-[11px] text-gray-500">총 매입가</p>
+            <p className="text-[11px] text-gray-500">매입 <span className="text-gray-400">(부가세 포함)</span></p>
             <p className="text-lg font-bold text-gray-900">{formatPrice(summary.totalPurchase)}</p>
+            <p className="text-[10px] text-gray-400 mt-0.5">공급가액 {formatPrice(summary.totalPurchaseSupply)}</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-3">
-            <p className="text-[11px] text-gray-500">총 납품가</p>
+            <p className="text-[11px] text-gray-500">납품 공급가액</p>
             <p className="text-lg font-bold text-gray-900">{formatPrice(summary.totalSupply)}</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-3">
-            <p className="text-[11px] text-gray-500">총 마진</p>
+            <p className="text-[11px] text-gray-500">부가세</p>
+            <p className="text-lg font-bold text-gray-700">{formatPrice(summary.totalSupplyVat)}</p>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-3">
+            <p className="text-[11px] text-gray-500">청구액 <span className="text-gray-400">(병원 청구)</span></p>
+            <p className="text-lg font-bold text-blue-700">{formatPrice(summary.totalBilled)}</p>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-3">
+            <p className="text-[11px] text-gray-500">마진 <span className="text-gray-400">(공급가액 기준)</span></p>
             <p className={`text-lg font-bold ${summary.totalMargin >= 0 ? "text-emerald-600" : "text-red-600"}`}>
               {formatPrice(summary.totalMargin)}
+            </p>
+            <p className="text-[10px] text-gray-400 mt-0.5">
+              {summary.totalSupply ? `${((summary.totalMargin / summary.totalSupply) * 100).toFixed(1)}%` : "-"}
             </p>
           </div>
         </div>
@@ -441,7 +478,7 @@ export default function OrderHistoryPage() {
                       <th className="text-left px-3 py-2 whitespace-nowrap">거래처</th>
                       <th className="text-right px-2 py-2 whitespace-nowrap">건수</th>
                       <th className="text-right px-2 py-2 whitespace-nowrap">총매입가</th>
-                      <th className="text-right px-2 py-2 whitespace-nowrap">총납품가</th>
+                      <th className="text-right px-2 py-2 whitespace-nowrap">공급가액</th>
                       <th className="text-right px-2 py-2 whitespace-nowrap">마진</th>
                       <th className="text-right px-3 py-2 whitespace-nowrap">마진율</th>
                     </tr>
@@ -461,7 +498,7 @@ export default function OrderHistoryPage() {
                           {formatPrice(v.margin)}
                         </td>
                         <td className="px-3 py-1.5 text-right text-gray-500 text-xs">
-                          {v.supply ? `${(((v.supply - v.purchase) / v.supply) * 100).toFixed(1)}%` : "-"}
+                          {v.supply ? `${((v.margin / v.supply) * 100).toFixed(1)}%` : "-"}
                         </td>
                       </tr>
                     ))}
@@ -516,7 +553,9 @@ export default function OrderHistoryPage() {
                     <th className="text-right px-2 py-2 whitespace-nowrap">매입가</th>
                     <th className="text-right px-2 py-2 whitespace-nowrap">총매입가</th>
                     <th className="text-right px-2 py-2 whitespace-nowrap">납품가</th>
-                    <th className="text-right px-2 py-2 whitespace-nowrap">총납품가</th>
+                    <th className="text-right px-2 py-2 whitespace-nowrap">공급가액</th>
+                    <th className="text-right px-2 py-2 whitespace-nowrap">부가세</th>
+                    <th className="text-right px-2 py-2 whitespace-nowrap">청구액</th>
                     <th
                       className="text-right px-2 py-2 cursor-pointer hover:text-gray-700 whitespace-nowrap"
                       onClick={() => toggleSort("margin")}
@@ -549,6 +588,8 @@ export default function OrderHistoryPage() {
                       <td className="px-2 py-1 text-right text-gray-700 text-xs">{formatPrice(r.total_purchase)}</td>
                       <td className="px-2 py-1 text-right text-gray-500 text-xs">{formatPrice(r.supply_price)}</td>
                       <td className="px-2 py-1 text-right text-gray-700 text-xs">{formatPrice(r.total_supply)}</td>
+                      <td className="px-2 py-1 text-right text-gray-500 text-xs">{formatPrice(r.supply_vat)}</td>
+                      <td className="px-2 py-1 text-right text-blue-700 font-medium text-xs">{formatPrice(r.billed_amount)}</td>
                       <td
                         className={`px-2 py-1 text-right font-medium text-xs ${
                           r.margin > 0 ? "text-emerald-600" : r.margin < 0 ? "text-red-600" : "text-gray-400"

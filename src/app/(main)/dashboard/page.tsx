@@ -24,24 +24,30 @@ interface RecentOrder {
   branch: { name: string };
 }
 
+// purchase 는 부가세 포함 매입, purchase_supply 는 부가세 뺀 매입 공급가액.
+// 마진은 공급가액끼리 뺀 값이라(supply - purchase_supply) 화면에서도 같은 기준을 같이 보여준다.
+interface MonthAmounts {
+  purchase: number;
+  purchase_supply: number;
+  supply: number;
+  supply_vat: number;
+  billed: number;
+  margin: number;
+}
+
 interface MonthComparison {
-  thisMonth: {
-    purchase: number;
-    supply: number;
-    margin: number;
-  };
-  lastMonth: {
-    purchase: number;
-    supply: number;
-    margin: number;
-  };
+  thisMonth: MonthAmounts;
+  lastMonth: MonthAmounts;
 }
 
 interface BranchMonthStats {
   branchId: string;
   branchName: string;
   purchase: number;
+  purchase_supply: number;
   supply: number;
+  supply_vat: number;
+  billed: number;
   margin: number;
 }
 
@@ -51,10 +57,19 @@ interface DashboardStatsRpc {
   purchase_order_count: number;
   order_count: number;
   total_margin: number;
-  this_month: { purchase: number; supply: number; margin: number };
-  last_month: { purchase: number; supply: number; margin: number };
-  branches: Array<{ branch_id: string; branch_name: string; purchase: number; supply: number; margin: number }>;
+  this_month: MonthAmounts;
+  last_month: MonthAmounts;
+  branches: Array<{ branch_id: string; branch_name: string } & MonthAmounts>;
 }
+
+const EMPTY_MONTH: MonthAmounts = {
+  purchase: 0,
+  purchase_supply: 0,
+  supply: 0,
+  supply_vat: 0,
+  billed: 0,
+  margin: 0,
+};
 
 const statusColors: Record<string, string> = {
   "발주완료": "bg-green-100 text-green-700",
@@ -66,7 +81,7 @@ const statusColors: Record<string, string> = {
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats>({ productCount: 0, orderCount: 0, purchaseOrderCount: 0, vendorCount: 0, totalMargin: 0 });
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
-  const [monthComparison, setMonthComparison] = useState<MonthComparison>({ thisMonth: { purchase: 0, supply: 0, margin: 0 }, lastMonth: { purchase: 0, supply: 0, margin: 0 } });
+  const [monthComparison, setMonthComparison] = useState<MonthComparison>({ thisMonth: EMPTY_MONTH, lastMonth: EMPTY_MONTH });
   const [branchMonthStats, setBranchMonthStats] = useState<BranchMonthStats[]>([]);
   const [loading, setLoading] = useState(true);
   const toast = useToast();
@@ -85,14 +100,21 @@ export default function DashboardPage() {
             vendorCount: d.vendor_count,
             totalMargin: d.total_margin,
           });
-          setMonthComparison({ thisMonth: d.this_month, lastMonth: d.last_month });
+          // 옛 RPC(부가세 필드 없음)로 돌아가도 화면이 깨지지 않게 기본값을 깐다.
+          setMonthComparison({
+            thisMonth: { ...EMPTY_MONTH, ...(d.this_month || {}) },
+            lastMonth: { ...EMPTY_MONTH, ...(d.last_month || {}) },
+          });
           setBranchMonthStats(
             (d.branches || []).map((b) => ({
               branchId: b.branch_id,
               branchName: b.branch_name,
-              purchase: b.purchase,
-              supply: b.supply,
-              margin: b.margin,
+              purchase: b.purchase ?? 0,
+              purchase_supply: b.purchase_supply ?? 0,
+              supply: b.supply ?? 0,
+              supply_vat: b.supply_vat ?? 0,
+              billed: b.billed ?? 0,
+              margin: b.margin ?? 0,
             }))
           );
           const { data: recent } = await supabase
@@ -107,7 +129,12 @@ export default function DashboardPage() {
         // 폴백: RPC 미적용 환경 — 기존 클라이언트 집계
         const [productsRes, ordersRes, vendorsRes, recentRes, branchesRes] = await Promise.all([
           supabase.from("products").select("id", { count: "exact", head: true }),
-          supabase.from("orders").select("id, total_margin, order_date, branch_id, total_purchase_amount, total_supply_amount", { count: "exact" }),
+          supabase
+            .from("orders")
+            .select(
+              "id, total_margin, order_date, branch_id, total_purchase_amount, total_purchase_supply, total_supply_amount, total_supply_vat, total_billed",
+              { count: "exact" }
+            ),
           supabase.from("vendors").select("id", { count: "exact", head: true }),
           supabase
             .from("orders")
@@ -139,48 +166,45 @@ export default function DashboardPage() {
         const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
         const lastMonthStr = lastMonth.getFullYear() + "-" + String(lastMonth.getMonth() + 1).padStart(2, "0");
 
-        let thisMonthPurchase = 0,
-          thisMonthSupply = 0,
-          thisMonthMargin = 0;
-        let lastMonthPurchase = 0,
-          lastMonthSupply = 0,
-          lastMonthMargin = 0;
+        type OrderRow = {
+          order_date: string;
+          branch_id: string | null;
+          total_purchase_amount: number | null;
+          total_purchase_supply: number | null;
+          total_supply_amount: number | null;
+          total_supply_vat: number | null;
+          total_billed: number | null;
+          total_margin: number | null;
+        };
+        const sumMonth = (rows: OrderRow[]): MonthAmounts =>
+          rows.reduce<MonthAmounts>(
+            (a, o) => ({
+              purchase: a.purchase + (o.total_purchase_amount || 0),
+              purchase_supply: a.purchase_supply + (o.total_purchase_supply || 0),
+              supply: a.supply + (o.total_supply_amount || 0),
+              supply_vat: a.supply_vat + (o.total_supply_vat || 0),
+              billed: a.billed + (o.total_billed || 0),
+              margin: a.margin + (o.total_margin || 0),
+            }),
+            { ...EMPTY_MONTH }
+          );
 
-        ordersRes.data?.forEach((o) => {
-          const oMonth = o.order_date.substring(0, 7);
-          if (oMonth === currentMonth) {
-            thisMonthPurchase += o.total_purchase_amount || 0;
-            thisMonthSupply += o.total_supply_amount || 0;
-            thisMonthMargin += o.total_margin || 0;
-          } else if (oMonth === lastMonthStr) {
-            lastMonthPurchase += o.total_purchase_amount || 0;
-            lastMonthSupply += o.total_supply_amount || 0;
-            lastMonthMargin += o.total_margin || 0;
-          }
-        });
+        const allOrders = (ordersRes.data || []) as unknown as OrderRow[];
+        const inMonth = (m: string) => allOrders.filter((o) => o.order_date.substring(0, 7) === m);
 
         setMonthComparison({
-          thisMonth: { purchase: thisMonthPurchase, supply: thisMonthSupply, margin: thisMonthMargin },
-          lastMonth: { purchase: lastMonthPurchase, supply: lastMonthSupply, margin: lastMonthMargin },
+          thisMonth: sumMonth(inMonth(currentMonth)),
+          lastMonth: sumMonth(inMonth(lastMonthStr)),
         });
 
         // 지점별 이번 달 현황
         const branches = (branchesRes.data || []) as Array<{ id: string; name: string }>;
-        const branchStats: BranchMonthStats[] = [];
-
-        branches.forEach((branch) => {
-          let bPurchase = 0,
-            bSupply = 0,
-            bMargin = 0;
-          ordersRes.data?.forEach((o) => {
-            if (o.branch_id === branch.id && o.order_date.substring(0, 7) === currentMonth) {
-              bPurchase += o.total_purchase_amount || 0;
-              bSupply += o.total_supply_amount || 0;
-              bMargin += o.total_margin || 0;
-            }
-          });
-          branchStats.push({ branchId: branch.id, branchName: branch.name, purchase: bPurchase, supply: bSupply, margin: bMargin });
-        });
+        const thisMonthOrders = inMonth(currentMonth);
+        const branchStats: BranchMonthStats[] = branches.map((branch) => ({
+          branchId: branch.id,
+          branchName: branch.name,
+          ...sumMonth(thisMonthOrders.filter((o) => o.branch_id === branch.id)),
+        }));
 
         setBranchMonthStats(branchStats);
       } catch (err) {
@@ -251,7 +275,7 @@ export default function DashboardPage() {
                   <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">지점</th>
                   <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">주문일</th>
                   <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">상태</th>
-                  <th className="text-right px-4 md:px-5 py-2.5 md:py-3 font-medium">공급가</th>
+                  <th className="text-right px-4 md:px-5 py-2.5 md:py-3 font-medium">공급가액</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -282,9 +306,11 @@ export default function DashboardPage() {
         <div className="bg-white rounded-xl border border-gray-200 p-4 md:p-6">
           <h2 className="font-bold text-gray-900 text-sm md:text-base mb-4">이번 달 vs 지난 달 비교</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* 구매금액 */}
+            {/* 매입 (부가세 포함) */}
             <div className="border border-gray-200 rounded-lg p-4">
-              <p className="text-xs md:text-sm text-gray-500 mb-2">구매금액</p>
+              <p className="text-xs md:text-sm text-gray-500 mb-2">
+                매입 <span className="text-gray-400">(부가세 포함)</span>
+              </p>
               <div className="flex items-end gap-2 mb-2">
                 <div>
                   <p className="text-lg md:text-2xl font-bold text-gray-900">{formatCurrency(monthComparison.thisMonth.purchase)}</p>
@@ -301,11 +327,16 @@ export default function DashboardPage() {
                 </div>
               </div>
               <p className="text-xs text-gray-500">지난 달: {formatCurrency(monthComparison.lastMonth.purchase)}</p>
+              <p className="text-[11px] text-gray-400 mt-1">
+                공급가액 {formatCurrency(monthComparison.thisMonth.purchase_supply)} · 마진은 이 값 기준
+              </p>
             </div>
 
-            {/* 공급가 */}
+            {/* 납품 공급가액 */}
             <div className="border border-gray-200 rounded-lg p-4">
-              <p className="text-xs md:text-sm text-gray-500 mb-2">공급가</p>
+              <p className="text-xs md:text-sm text-gray-500 mb-2">
+                납품 공급가액 <span className="text-gray-400">(부가세 별도)</span>
+              </p>
               <div className="flex items-end gap-2 mb-2">
                 <div>
                   <p className="text-lg md:text-2xl font-bold text-gray-900">{formatCurrency(monthComparison.thisMonth.supply)}</p>
@@ -322,11 +353,17 @@ export default function DashboardPage() {
                 </div>
               </div>
               <p className="text-xs text-gray-500">지난 달: {formatCurrency(monthComparison.lastMonth.supply)}</p>
+              <p className="text-[11px] text-gray-400 mt-1">
+                부가세 {formatCurrency(monthComparison.thisMonth.supply_vat)} · 청구액{" "}
+                {formatCurrency(monthComparison.thisMonth.billed)}
+              </p>
             </div>
 
             {/* 마진 */}
             <div className="border border-gray-200 rounded-lg p-4">
-              <p className="text-xs md:text-sm text-gray-500 mb-2">마진</p>
+              <p className="text-xs md:text-sm text-gray-500 mb-2">
+                마진 <span className="text-gray-400">(공급가액 기준)</span>
+              </p>
               <div className="flex items-end gap-2 mb-2">
                 <div>
                   <p className="text-lg md:text-2xl font-bold text-emerald-600">{formatCurrency(monthComparison.thisMonth.margin)}</p>
@@ -343,6 +380,12 @@ export default function DashboardPage() {
                 </div>
               </div>
               <p className="text-xs text-gray-500">지난 달: {formatCurrency(monthComparison.lastMonth.margin)}</p>
+              <p className="text-[11px] text-gray-400 mt-1">
+                납품 공급가액 − 매입 공급가액
+                {monthComparison.thisMonth.supply > 0
+                  ? ` · ${((monthComparison.thisMonth.margin / monthComparison.thisMonth.supply) * 100).toFixed(1)}%`
+                  : ""}
+              </p>
             </div>
           </div>
         </div>
@@ -365,8 +408,9 @@ export default function DashboardPage() {
                       style={{ width: `${(branch.purchase / maxPurchase) * 100}%` }}
                     />
                   </div>
-                  <div className="flex gap-4 mt-1.5 text-xs text-gray-500">
-                    <span>공급: {formatCurrency(branch.supply)}</span>
+                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1.5 text-xs text-gray-500">
+                    <span>공급가액: {formatCurrency(branch.supply)}</span>
+                    <span>청구액: {formatCurrency(branch.billed)}</span>
                     <span>마진: {formatCurrency(branch.margin)}</span>
                   </div>
                 </div>
