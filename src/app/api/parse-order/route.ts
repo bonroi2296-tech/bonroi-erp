@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
+import { orderSpecTokens, productSpecTokens, specRelation, shouldAskSpec } from "@/lib/spec-match";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -235,7 +236,10 @@ export async function POST(request: Request) {
     for (const i of l.match_indices) { const p = cat[i]; if (p) geminiIds.add(p.id); }
     const lk = learned[norm(l.raw_name)] || {};
 
-    // 후보: 사람 확정(학습) >> 지점 이력 > 전지점 이력 순. 이력 없는 동일군 잡음은 제거
+    // 주문에 적힌 규격(200매·20*20·2M·Y타입 등). 이걸로 형제 제품을 갈라낸다.
+    const orderTokens = orderSpecTokens(l.raw_name, l.quantity, l.unit);
+
+    // 후보: 규격 일치 >> 사람 확정(학습) >> 지점 이력 > 전지점 이력 순. 이력 없는 동일군 잡음은 제거
     const candidates = (lineCandIds[li] || [])
       .map((id) => {
         const p = catById[id];
@@ -244,6 +248,7 @@ export async function POST(request: Request) {
           id: p.id,
           name: p.name,
           spec: p.spec,
+          rel: specRelation(orderTokens, productSpecTokens(p.name, p.spec)),
           learned: lk[p.id] || 0,
           gemini: geminiIds.has(p.id),
           bcnt: histBranch[p.id]?.cnt ?? 0,
@@ -256,6 +261,9 @@ export async function POST(request: Request) {
       .filter((c) => c.gemini || c.learned > 0 || c.bcnt > 0 || c.gcnt > 0)
       .sort(
         (a, b) =>
+          // 규격이 맞는 쪽을 맨 앞, 어긋나는 쪽을 맨 뒤로. 이력 건수보다 규격이 우선이다.
+          Number(b.rel === "match") - Number(a.rel === "match") ||
+          Number(a.rel === "conflict") - Number(b.rel === "conflict") ||
           b.learned - a.learned ||
           b.bcnt - a.bcnt ||
           b.gcnt - a.gcnt ||
@@ -263,7 +271,14 @@ export async function POST(request: Request) {
       )
       .slice(0, 12);
 
-    const top = candidates[0];
+    // 규격이 어긋나지 않아 아직 후보로 남은 형제들
+    const alive = candidates.filter((c) => c.rel !== "conflict");
+    const cheapest = (id: string) => priceMap[id]?.[0]?.price ?? null;
+    // 규격으로 하나로 못 좁혔는데 형제끼리 값이 많이 다르면 사람에게 묻는다
+    const askSpec = shouldAskSpec(alive.map((c) => cheapest(c.id)));
+    const allConflict = candidates.length > 0 && alive.length === 0;
+
+    const top = alive[0] ?? candidates[0];
 
     let confidence = 0;
     let reason = "";
@@ -300,7 +315,28 @@ export async function POST(request: Request) {
       reason = "카탈로그에 없음(신규)";
     }
 
-    const best = top ? priceMap[top.id]?.[0] : undefined;
+    // 규격이 갈리면 이력 건수로 밀어붙이지 않는다. 엉뚱한 형제의 단가가 붙는 걸 막는 마지막 관문.
+    if (askSpec) {
+      autoMatch = false;
+      const opts = alive
+        .slice(0, 4)
+        .map((c) => {
+          const price = cheapest(c.id);
+          return `${c.spec || c.name}${price != null ? ` ₩${price.toLocaleString()}` : " 단가 미확인"}`;
+        })
+        .join(" / ");
+      note = `규격을 골라주세요 — ${opts}`;
+      reason = "규격 미기재 · 형제 제품 가격차 큼";
+      confidence = Math.min(confidence, 40);
+    } else if (allConflict) {
+      autoMatch = false;
+      note = "적힌 규격과 맞는 제품이 없어요. 확인해 주세요.";
+      reason = "규격 불일치";
+      confidence = Math.min(confidence, 30);
+    }
+
+    // 규격을 물어봐야 하는 줄은 단가도 보여주지 않는다(엉뚱한 형제 값일 수 있음).
+    const best = !askSpec && top ? priceMap[top.id]?.[0] : undefined;
     return {
       raw_name: l.raw_name,
       quantity: l.quantity,
@@ -309,7 +345,22 @@ export async function POST(request: Request) {
       confidence,
       reason,
       note,
-      candidates: candidates.map((c) => ({ id: c.id, name: c.name, spec: c.spec })),
+      // 후보마다 최저가 거래처를 같이 내려준다. 사용자가 규격을 고르면 화면이 이 값을 그대로 쓴다
+      // (가격 고르는 규칙이 서버·화면 두 벌로 갈라지지 않게).
+      candidates: candidates.map((c) => {
+        const b = priceMap[c.id]?.[0];
+        return {
+          id: c.id,
+          name: c.name,
+          spec: c.spec,
+          spec_match: c.rel,
+          vendor: b?.vendor ?? null,
+          vendor_id: b?.vendor_id ?? null,
+          price: b?.price ?? null,
+          sourceable: (priceMap[c.id]?.length ?? 0) > 0,
+        };
+      }),
+      needs_spec: askSpec,
       product_id: autoMatch && top ? top.id : "",
       best_vendor: best ? best.vendor : null,
       best_vendor_id: best && best.vendor_id ? best.vendor_id : null,

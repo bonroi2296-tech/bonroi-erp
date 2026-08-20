@@ -12,6 +12,13 @@ interface Cand {
   id: string;
   name: string;
   spec: string | null;
+  // 주문에 적힌 규격과의 관계. 서버가 매겨서 내려준다.
+  spec_match?: "match" | "conflict" | "unknown";
+  // 이 후보의 최저가 거래처(서버가 품절 거래처를 뺀 결과)
+  vendor?: string | null;
+  vendor_id?: string | null;
+  price?: number | null;
+  sourceable?: boolean;
 }
 interface Line {
   raw_name: string;
@@ -22,6 +29,8 @@ interface Line {
   reason: string;
   note: string;
   candidates: Cand[];
+  // 규격이 갈려서 사람이 골라야 하는 줄
+  needs_spec: boolean;
   product_id: string;
   best_vendor: string | null;
   best_vendor_id: string | null;
@@ -96,9 +105,20 @@ export default function ParseOrderPage() {
   };
   const pickProduct = (i: number, p: Cand) => {
     setLines((prev) =>
-      prev.map((l, j) =>
-        j === i ? { ...l, product_id: p.id, candidates: [p, ...l.candidates.filter((c) => c.id !== p.id)] } : l
-      )
+      prev.map((l, j) => {
+        if (j !== i) return l;
+        // 이미 후보에 있던 제품이면 서버가 붙여준 거래처·단가를 살린다(검색 결과엔 그 정보가 없다).
+        const c = l.candidates.find((x) => x.id === p.id) ?? p;
+        return {
+          ...l,
+          product_id: c.id,
+          candidates: [c, ...l.candidates.filter((x) => x.id !== c.id)],
+          best_vendor: c.vendor ?? null,
+          best_vendor_id: c.vendor_id ?? null,
+          best_price: c.price ?? null,
+          sourceable: c.sourceable ?? false,
+        };
+      })
     );
     closeSearch();
   };
@@ -177,21 +197,53 @@ export default function ParseOrderPage() {
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines((prev) => prev.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
-  // AI 추천(1순위 후보)을 미매칭 품목에 한 번에 적용
-  const applyRecommendations = () => {
-    let n = 0;
+  // 제품을 고르면 그 제품의 거래처·단가도 같이 따라오게 한다.
+  // 규격을 물어본 줄은 서버가 단가를 비워 보내므로, 사용자가 고른 형제의 값이 여기서 채워진다.
+  const chooseProduct = (i: number, productId: string) =>
     setLines((prev) =>
-      prev.map((l) => {
-        if (!l.product_id && l.candidates.length > 0) {
-          n += 1;
-          return { ...l, product_id: l.candidates[0].id };
-        }
-        return l;
+      prev.map((l, j) => {
+        if (j !== i) return l;
+        const c = l.candidates.find((x) => x.id === productId);
+        return {
+          ...l,
+          product_id: productId,
+          best_vendor: c?.vendor ?? null,
+          best_vendor_id: c?.vendor_id ?? null,
+          best_price: c?.price ?? null,
+          sourceable: c?.sourceable ?? false,
+        };
       })
     );
-    toast.success(n > 0 ? `추천 ${n}건 적용` : "적용할 추천이 없습니다.");
+
+  // AI 추천(1순위 후보)을 미매칭 품목에 한 번에 적용.
+  // 규격을 물어본 줄은 건너뛴다 — 한 번 눌러서 질문이 무시되면 물어보는 의미가 없다.
+  const applyRecommendations = () => {
+    let n = 0;
+    let skipped = 0;
+    setLines((prev) =>
+      prev.map((l) => {
+        if (l.product_id || l.candidates.length === 0) return l;
+        if (l.needs_spec) {
+          skipped += 1;
+          return l;
+        }
+        n += 1;
+        const c = l.candidates[0];
+        return {
+          ...l,
+          product_id: c.id,
+          best_vendor: c.vendor ?? l.best_vendor,
+          best_vendor_id: c.vendor_id ?? l.best_vendor_id,
+          best_price: c.price ?? l.best_price,
+          sourceable: c.sourceable ?? l.sourceable,
+        };
+      })
+    );
+    if (n > 0) toast.success(`추천 ${n}건 적용${skipped > 0 ? ` · 규격 확인 필요 ${skipped}건은 건너뜀` : ""}`);
+    else if (skipped > 0) toast.info(`규격을 직접 골라야 하는 ${skipped}건만 남았습니다.`);
+    else toast.success("적용할 추천이 없습니다.");
   };
-  const recommendable = lines.filter((l) => !l.product_id && l.candidates.length > 0).length;
+  const recommendable = lines.filter((l) => !l.product_id && !l.needs_spec && l.candidates.length > 0).length;
 
   const create = async () => {
     const valid = lines.filter((l) => l.raw_name.trim());
@@ -256,6 +308,8 @@ export default function ParseOrderPage() {
           ? `발주건 생성 완료 · ${assignedCount}건 추천 거래처로 자동 발주`
           : "발주건 생성 완료"
       );
+      const unresolved = valid.filter((l) => l.needs_spec && !l.product_id).length;
+      if (unresolved > 0) toast.info(`규격을 못 정한 ${unresolved}건은 확보 관리에서 직접 지정해 주세요.`);
       router.push(`/sourcing/${job.id}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "생성 오류");
@@ -377,21 +431,25 @@ export default function ParseOrderPage() {
                         value={l.product_id}
                         onChange={(e) => {
                           if (e.target.value === "__search__") openSearch(i, l.raw_name);
-                          else updateLine(i, { product_id: e.target.value });
+                          else chooseProduct(i, e.target.value);
                         }}
-                        className="flex-1 min-w-[200px] px-2 py-1.5 border border-gray-200 rounded-lg text-sm"
+                        className={`flex-1 min-w-[200px] px-2 py-1.5 border rounded-lg text-sm ${
+                          l.needs_spec && !l.product_id ? "border-amber-400 bg-amber-50" : "border-gray-200"
+                        }`}
                       >
                         <option value="">매칭 안 함 (미확정)</option>
                         {l.candidates.map((c) => (
                           <option key={c.id} value={c.id}>
                             {c.name}{c.spec ? ` (${c.spec})` : ""}
+                            {c.price != null ? ` · ₩${c.price.toLocaleString()}` : ""}
+                            {c.spec_match === "conflict" ? " · 규격 다름" : ""}
                           </option>
                         ))}
                         <option value="__search__">+ 직접 검색…</option>
                       </select>
-                      {!l.product_id && l.candidates.length > 0 && (
+                      {!l.product_id && !l.needs_spec && l.candidates.length > 0 && (
                         <button
-                          onClick={() => updateLine(i, { product_id: l.candidates[0].id })}
+                          onClick={() => chooseProduct(i, l.candidates[0].id)}
                           title={`추천 적용: ${l.candidates[0].name}`}
                           className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50"
                         >
@@ -441,8 +499,12 @@ export default function ParseOrderPage() {
                       </div>
                     )}
                     {l.note && (
-                      <div className="flex items-center gap-1 mt-1 text-xs text-amber-600">
-                        <AlertTriangle className="w-3 h-3" /> {l.note}
+                      <div
+                        className={`flex items-start gap-1 mt-1 text-xs ${
+                          l.needs_spec && !l.product_id ? "text-amber-700 font-medium" : "text-amber-600"
+                        }`}
+                      >
+                        <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" /> {l.note}
                       </div>
                     )}
                   </div>
