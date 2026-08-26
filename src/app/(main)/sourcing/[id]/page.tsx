@@ -7,7 +7,8 @@ import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/Toast";
 import type { TablesUpdate, TablesInsert } from "@/lib/database.types";
-import { ArrowLeft, Plus, Trash2, CheckCircle2, Truck, Upload, X, Sparkles, Copy, ChevronDown, ChevronUp } from "lucide-react";
+import ConfirmDialog, { type ConfirmRequest } from "@/components/ConfirmDialog";
+import { ArrowLeft, Plus, Trash2, CheckCircle2, Truck, Upload, X, Sparkles, Copy, ChevronDown, ChevronUp, Repeat2 } from "lucide-react";
 
 interface Alloc {
   id: string;
@@ -158,6 +159,18 @@ export default function SourcingDetailPage() {
     });
   };
   const [loading, setLoading] = useState(true);
+  // 삭제 확인창(품목·배정 공용)
+  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const runConfirm = async (fn: () => Promise<void>) => {
+    setConfirmBusy(true);
+    try {
+      await fn();
+      setConfirmReq(null);
+    } finally {
+      setConfirmBusy(false);
+    }
+  };
 
   // 거래처 일괄배정용 선택 상태
   const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set());
@@ -275,7 +288,28 @@ export default function SourcingDetailPage() {
   const deleteDemand = async (demandId: string) => {
     const { error } = await supabase.from("demand_lines").delete().eq("id", demandId);
     if (error) return toast.error(error.message);
+    toast.success("품목을 삭제했어요.");
     fetchJob();
+  };
+
+  // 품목을 지우면 그 품목에 붙은 거래처 배정도 같이 사라진다(DB cascade). 먼저 보여주고 확인받는다.
+  const askDeleteDemand = (d: Demand) => {
+    const allocs = d.sourcing_allocations ?? [];
+    const details = [`품목: ${d.raw_name} (필요 ${d.required_qty}${d.unit_label ? ` ${d.unit_label}` : ""})`];
+    for (const a of allocs) {
+      details.push(`배정: ${a.vendor?.name ?? a.vendor_label ?? "미지정"} · 발주 ${a.order_qty}`);
+    }
+    const shipped = allocs.filter((a) => a.status === "shipped" || a.status === "partial").length;
+    setConfirmReq({
+      title: "이 품목을 삭제할까요?",
+      message:
+        allocs.length > 0
+          ? `배정된 거래처 ${allocs.length}곳도 함께 삭제됩니다. 되돌릴 수 없습니다.`
+          : "되돌릴 수 없습니다.",
+      details,
+      warning: shipped > 0 ? `이미 출고(부분출고 포함)된 배정이 ${shipped}건 있습니다.` : undefined,
+      onConfirm: () => runConfirm(() => deleteDemand(d.id)),
+    });
   };
 
   // 품목별 납품가(병원가) 덮어쓰기. 빈값이면 null → 품목마스터 기본값 사용.
@@ -371,6 +405,38 @@ export default function SourcingDetailPage() {
   const deleteAlloc = async (allocId: string) => {
     const { error } = await supabase.from("sourcing_allocations").delete().eq("id", allocId);
     if (error) return toast.error(error.message);
+    toast.success("배정을 삭제했어요.");
+    fetchJob();
+  };
+
+  const askDeleteAlloc = (d: Demand, a: Alloc) => {
+    setConfirmReq({
+      title: "이 거래처 배정을 삭제할까요?",
+      message: "품목은 남고 이 배정만 사라집니다. 되돌릴 수 없습니다.",
+      details: [
+        `품목: ${d.raw_name}`,
+        `거래처: ${a.vendor?.name ?? a.vendor_label ?? "미지정"}`,
+        `발주 ${a.order_qty}${a.unit_price != null ? ` · 단가 ${a.unit_price.toLocaleString()}원` : ""}`,
+      ],
+      warning:
+        a.status === "shipped" || a.status === "partial"
+          ? "이미 출고 처리된 배정입니다. 정산 금액이 함께 바뀝니다."
+          : undefined,
+      onConfirm: () => runConfirm(() => deleteAlloc(a.id)),
+    });
+  };
+
+  // 거래처 "바꾸기" — 기존 배정 줄을 고른 거래처로 갈아끼운다(새로 만들지 않는다).
+  const replaceAlloc = async (
+    allocId: string,
+    payload: { vendor_id: string | null; vendor_label: string | null; order_qty: number; unit_price: number | null }
+  ) => {
+    const { error } = await supabase
+      .from("sourcing_allocations")
+      .update({ ...payload, updated_at: new Date().toISOString() })
+      .eq("id", allocId);
+    if (error) return toast.error(error.message);
+    toast.success("거래처를 바꿨어요.");
     fetchJob();
   };
 
@@ -822,8 +888,9 @@ export default function SourcingDetailPage() {
                 <th className="text-right px-2 py-2 whitespace-nowrap">주문 수량</th>
                 <th className="text-left px-3 py-2">출고 제품(실제)</th>
                 <th className="text-right px-2 py-2 whitespace-nowrap">출고 수량</th>
+                <th className="text-left px-2 py-2 whitespace-nowrap">거래처</th>
                 <th className="text-left px-2 py-2">사유</th>
-                <th className="w-8"></th>
+                <th className="w-10"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -836,6 +903,10 @@ export default function SourcingDetailPage() {
                   : "(매칭 필요)";
                 const showShipped = reason !== "재고 없음";
                 const expanded = expandedRows.has(d.id);
+                const allocCount = d.sourcing_allocations.length;
+                const vendorNames = d.sourcing_allocations
+                  .map((a) => a.vendor?.name ?? a.vendor_label ?? "미지정")
+                  .join(", ");
                 const reasonCls = reason === "재고 없음"
                   ? "bg-red-100 text-red-700"
                   : reason
@@ -867,6 +938,20 @@ export default function SourcingDetailPage() {
                       <td className="px-2 py-1.5 text-right text-xs whitespace-nowrap">
                         {showShipped ? secured : <span className="text-gray-400">—</span>}
                       </td>
+                      <td className="px-2 py-1.5 text-xs whitespace-nowrap">
+                        {allocCount > 0 ? (
+                          <span
+                            className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700"
+                            title={vendorNames}
+                          >
+                            {allocCount}곳
+                          </span>
+                        ) : (
+                          <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">
+                            미배정
+                          </span>
+                        )}
+                      </td>
                       <td className="px-2 py-1.5 text-xs">
                         {reason && (
                           <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${reasonCls}`}>
@@ -876,17 +961,18 @@ export default function SourcingDetailPage() {
                       </td>
                       <td className="px-1 text-right">
                         <button
-                          onClick={(e) => { e.stopPropagation(); deleteDemand(d.id); }}
-                          className="p-1 text-gray-300 hover:text-red-500"
+                          onClick={(e) => { e.stopPropagation(); askDeleteDemand(d); }}
+                          className="p-2 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50"
                           title="품목 삭제"
+                          aria-label={`${d.raw_name} 품목 삭제`}
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </td>
                     </tr>
                     {expanded && (
                       <tr>
-                        <td colSpan={8} className="bg-gray-50/70 px-4 py-3">
+                        <td colSpan={9} className="bg-gray-50/70 px-4 py-3">
                           <div className="space-y-3">
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
                               <span className="text-gray-500">발주 {ordered} · 확보 {secured} / 필요 {d.required_qty}</span>
@@ -915,9 +1001,10 @@ export default function SourcingDetailPage() {
                               vendors={vendors}
                               options={d.product_id ? vendorOptions[d.product_id] ?? [] : []}
                               onAdd={(p) => addAlloc(d.id, p)}
+                              onReplace={(allocId, p) => replaceAlloc(allocId, p)}
                               onStatus={onStatusChange}
                               onShipped={(a, qty) => updateAlloc(a.id, { shipped_qty: qty })}
-                              onDelete={deleteAlloc}
+                              onDelete={(a) => askDeleteAlloc(d, a)}
                             />
                           </div>
                         </td>
@@ -970,6 +1057,8 @@ export default function SourcingDetailPage() {
         </div>
       </div>
 
+      <ConfirmDialog request={confirmReq} busy={confirmBusy} onCancel={() => setConfirmReq(null)} />
+
       {reconcileFor && (
         <ReconcileModal
           jobId={id}
@@ -990,6 +1079,7 @@ function AllocTable({
   vendors,
   options,
   onAdd,
+  onReplace,
   onStatus,
   onShipped,
   onDelete,
@@ -999,11 +1089,18 @@ function AllocTable({
   vendors: Vendor[];
   options: VendorOption[];
   onAdd: (p: { vendor_id: string | null; vendor_label: string | null; order_qty: number; unit_price: number | null }) => void;
+  onReplace: (
+    allocId: string,
+    p: { vendor_id: string | null; vendor_label: string | null; order_qty: number; unit_price: number | null }
+  ) => void;
   onStatus: (a: Alloc, status: string) => void;
   onShipped: (a: Alloc, qty: number) => void;
-  onDelete: (allocId: string) => void;
+  onDelete: (a: Alloc) => void;
 }) {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
+  // null = 새 배정 추가 / 배정 id = 그 배정을 다른 거래처로 교체
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [vendorSel, setVendorSel] = useState("");
   const [vendorText, setVendorText] = useState("");
   const [qty, setQty] = useState("");
@@ -1011,38 +1108,87 @@ function AllocTable({
   const cheapestId = options.find((o) => o.available)?.vendor_id;
   // 아직 거래처에 안 붙은 남은 필요수량(매번 손으로 안 치게 기본값으로)
   const remaining = Math.max(0, requiredQty - allocs.reduce((s, a) => s + a.order_qty, 0));
-  const openForm = () => {
-    const next = !open;
-    setOpen(next);
-    if (next && !qty) setQty(String(remaining || requiredQty));
-  };
 
-  const submit = () => {
-    const isNew = vendorSel === "__new__";
-    if (!isNew && !vendorSel) return;
-    if (isNew && !vendorText.trim()) return;
-    onAdd({
-      vendor_id: isNew ? null : vendorSel,
-      vendor_label: isNew ? vendorText.trim() : null,
-      order_qty: Number(qty) || 0,
-      unit_price: price ? Number(price) : null,
-    });
+  const reset = () => {
     setVendorSel("");
     setVendorText("");
     setQty("");
     setPrice("");
+    setEditingId(null);
     setOpen(false);
   };
+
+  const openAdd = () => {
+    if (open && editingId === null) return reset();
+    setEditingId(null);
+    setVendorSel("");
+    setVendorText("");
+    setQty(String(remaining || requiredQty));
+    setPrice("");
+    setOpen(true);
+  };
+
+  const openReplace = (a: Alloc) => {
+    if (open && editingId === a.id) return reset();
+    setEditingId(a.id);
+    setVendorSel(a.vendor_id ?? (a.vendor_label ? "__new__" : ""));
+    setVendorText(a.vendor_label ?? "");
+    setQty(String(a.order_qty));
+    setPrice(a.unit_price != null ? String(a.unit_price) : "");
+    setOpen(true);
+  };
+
+  const submit = () => {
+    const isNew = vendorSel === "__new__";
+    if (!isNew && !vendorSel) return toast.error("거래처를 고르세요.");
+    if (isNew && !vendorText.trim()) return toast.error("새 거래처명을 입력하세요.");
+    const payload = {
+      vendor_id: isNew ? null : vendorSel,
+      vendor_label: isNew ? vendorText.trim() : null,
+      order_qty: Number(qty) || 0,
+      unit_price: price ? Number(price) : null,
+    };
+    // 같은 품목에 같은 거래처가 두 줄로 겹치는 사고 방지
+    const dupe = allocs.find(
+      (a) =>
+        a.id !== editingId &&
+        (payload.vendor_id ? a.vendor_id === payload.vendor_id : a.vendor_id === null && a.vendor_label === payload.vendor_label)
+    );
+    if (dupe) {
+      return toast.error(
+        `${dupe.vendor?.name ?? dupe.vendor_label ?? "이 거래처"}는 이미 이 품목에 배정돼 있어요. 그 줄에서 수량을 고치세요.`
+      );
+    }
+    if (editingId) onReplace(editingId, payload);
+    else onAdd(payload);
+    reset();
+  };
+
+  const formOpen = open;
+  const editingAlloc = editingId ? allocs.find((a) => a.id === editingId) ?? null : null;
 
   return (
     <div className="space-y-2">
       {allocs.length > 0 && (
         <div className="space-y-1.5">
           {allocs.map((a) => (
-            <div key={a.id} className="flex flex-wrap items-center gap-2 text-sm bg-gray-50 rounded-lg px-3 py-2">
+            <div
+              key={a.id}
+              className={`flex flex-wrap items-center gap-2 text-sm rounded-lg px-3 py-2 ${
+                editingId === a.id ? "bg-blue-50 ring-1 ring-blue-200" : "bg-gray-50"
+              }`}
+            >
               <span className="font-medium text-gray-900 min-w-[100px]">{a.vendor?.name ?? a.vendor_label ?? "미지정"}</span>
               <span className="text-gray-500">발주 {a.order_qty}</span>
               {a.unit_price != null && <span className="text-gray-400">@{a.unit_price.toLocaleString()}</span>}
+              <button
+                type="button"
+                onClick={() => openReplace(a)}
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-blue-700 border border-blue-200 hover:bg-blue-100"
+                title="이 배정의 거래처를 바꿉니다(새로 만들지 않음)"
+              >
+                <Repeat2 className="w-3.5 h-3.5" /> 바꾸기
+              </button>
               <select
                 value={a.status}
                 onChange={(e) => onStatus(a, e.target.value)}
@@ -1064,8 +1210,13 @@ function AllocTable({
                   title="출고 수량"
                 />
               )}
-              <button onClick={() => onDelete(a.id)} className="p-1 text-gray-300 hover:text-red-500" title="삭제">
-                <Trash2 className="w-3.5 h-3.5" />
+              <button
+                onClick={() => onDelete(a)}
+                className="p-2 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50"
+                title="이 배정 삭제"
+                aria-label={`${a.vendor?.name ?? a.vendor_label ?? "미지정"} 배정 삭제`}
+              >
+                <Trash2 className="w-4 h-4" />
               </button>
             </div>
           ))}
@@ -1074,15 +1225,20 @@ function AllocTable({
 
       <button
         type="button"
-        onClick={openForm}
+        onClick={openAdd}
         className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800"
       >
-        {allocs.length > 0 ? "거래처 바꾸기 · 추가" : "거래처 고르기"}
-        {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        {allocs.length > 0 ? "+ 거래처 추가" : "거래처 고르기"}
+        {formOpen && editingId === null ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
       </button>
 
-      {open && (
+      {formOpen && (
         <>
+          {editingAlloc && (
+            <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-md px-2 py-1.5">
+              <b>{editingAlloc.vendor?.name ?? editingAlloc.vendor_label ?? "미지정"}</b> 배정을 다른 거래처로 바꿉니다. 줄이 늘지 않습니다.
+            </p>
+          )}
           {options.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 pt-1">
           <span className="text-xs text-gray-400">추천:</span>
@@ -1152,9 +1308,26 @@ function AllocTable({
         />
         <button
           onClick={submit}
-          className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+          className={`flex items-center gap-1 px-3 py-1.5 text-white rounded-lg text-sm font-medium ${
+            editingId ? "bg-amber-600 hover:bg-amber-700" : "bg-blue-600 hover:bg-blue-700"
+          }`}
         >
-          <Plus className="w-3.5 h-3.5" /> 거래처 추가
+          {editingId ? (
+            <>
+              <Repeat2 className="w-3.5 h-3.5" /> 이 거래처로 바꾸기
+            </>
+          ) : (
+            <>
+              <Plus className="w-3.5 h-3.5" /> 거래처 추가
+            </>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={reset}
+          className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
+        >
+          취소
         </button>
       </div>
         </>
@@ -1502,8 +1675,13 @@ function ReconcileModal({
                       placeholder="단가"
                       className="w-24 px-2 py-1.5 border border-gray-200 rounded-lg text-sm text-right"
                     />
-                    <button onClick={() => setRows((prev) => prev?.filter((_, j) => j !== i) ?? prev)} className="p-1 text-gray-300 hover:text-red-500">
-                      <Trash2 className="w-3.5 h-3.5" />
+                    <button
+                      onClick={() => setRows((prev) => prev?.filter((_, j) => j !== i) ?? prev)}
+                      className="p-2 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50"
+                      title="이 줄 빼기"
+                      aria-label="이 줄 빼기"
+                    >
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 ))}

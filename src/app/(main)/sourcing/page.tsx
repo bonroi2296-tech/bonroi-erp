@@ -6,6 +6,7 @@ import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/Toast";
 import { branchColor } from "@/lib/colors";
+import ConfirmDialog, { type ConfirmRequest } from "@/components/ConfirmDialog";
 import { Plus, X, Trash2, PackageSearch, AlertTriangle, CheckCircle2, Sparkles } from "lucide-react";
 
 interface AllocRow {
@@ -63,6 +64,8 @@ export default function SourcingPage() {
   const [deliveryNote, setDeliveryNote] = useState("");
   const [demands, setDemands] = useState<NewDemand[]>([emptyDemand()]);
   const [saving, setSaving] = useState(false);
+  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   const fetchJobs = useCallback(async () => {
     const { data } = await supabase
@@ -133,6 +136,44 @@ export default function SourcingPage() {
     }
   };
 
+  // 발주건 삭제 — DB가 딸린 품목·배정·정산을 함께 정리한다(ON DELETE CASCADE).
+  const deleteJob = async (job: JobRow) => {
+    setConfirmBusy(true);
+    try {
+      const { error } = await supabase.from("sourcing_jobs").delete().eq("id", job.id);
+      if (error) return toast.error(error.message);
+      toast.success(`"${job.title}" 발주건을 삭제했어요.`);
+      setConfirmReq(null);
+      fetchJobs();
+    } finally {
+      setConfirmBusy(false);
+    }
+  };
+
+  const askDeleteJob = (job: JobRow) => {
+    const lines = job.demand_lines || [];
+    const allocCount = lines.reduce((n, d) => n + (d.sourcing_allocations || []).length, 0);
+    const securedTotal = lines.reduce(
+      (n, d) => n + (d.sourcing_allocations || []).reduce((a, x) => a + securedOf(x), 0),
+      0
+    );
+    setConfirmReq({
+      title: "이 발주건을 삭제할까요?",
+      message: "딸린 품목·거래처 배정·정산 기록까지 함께 지워집니다. 되돌릴 수 없습니다.",
+      details: [
+        `발주건: ${job.title}`,
+        job.branch?.name ? `지점: ${job.branch.name}` : "지점: 미지정",
+        `품목 ${lines.length}종 · 거래처 배정 ${allocCount}건`,
+      ],
+      warning:
+        securedTotal > 0
+          ? `이미 ${securedTotal}개가 출고 확보된 발주건입니다. 정말 지울지 한 번 더 확인하세요.`
+          : undefined,
+      confirmLabel: "발주건 삭제",
+      onConfirm: () => deleteJob(job),
+    });
+  };
+
   const summarize = (job: JobRow) => {
     let required = 0;
     let secured = 0;
@@ -184,12 +225,20 @@ export default function SourcingPage() {
               const pct = s.required > 0 ? Math.min(100, Math.round((s.secured / s.required) * 100)) : 0;
               const done = s.shortLines === 0 && s.required > 0;
               return (
+                <div key={job.id} className="relative">
+                  <button
+                    onClick={() => askDeleteJob(job)}
+                    className="absolute top-2 right-2 z-10 p-2 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50"
+                    title="발주건 삭제"
+                    aria-label={`${job.title} 발주건 삭제`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 <Link
-                  key={job.id}
                   href={`/sourcing/${job.id}`}
                   className="bg-white rounded-xl border border-gray-200 p-4 md:p-5 hover:shadow-md transition-shadow block"
                 >
-                  <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="flex items-start justify-between gap-2 mb-2 pr-8">
                     <h3 className="font-bold text-gray-900 text-sm md:text-base truncate">{job.title}</h3>
                     {done ? (
                       <span className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
@@ -230,11 +279,14 @@ export default function SourcingPage() {
                     />
                   </div>
                 </Link>
+                </div>
               );
             })}
           </div>
         )}
       </div>
+
+      <ConfirmDialog request={confirmReq} busy={confirmBusy} onCancel={() => setConfirmReq(null)} />
 
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
