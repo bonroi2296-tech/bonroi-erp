@@ -261,6 +261,7 @@ export type Database = {
           item_status: string | null
           margin: number | null
           margin_old: number | null
+          note: string | null
           order_id: string
           product_id: string | null
           purchase_price: number | null
@@ -285,6 +286,7 @@ export type Database = {
           item_status?: string | null
           margin?: number | null
           margin_old?: number | null
+          note?: string | null
           order_id: string
           product_id?: string | null
           purchase_price?: number | null
@@ -309,6 +311,7 @@ export type Database = {
           item_status?: string | null
           margin?: number | null
           margin_old?: number | null
+          note?: string | null
           order_id?: string
           product_id?: string | null
           purchase_price?: number | null

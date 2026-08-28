@@ -130,6 +130,21 @@ function billedQty(a: Alloc): number {
   if (a.status === "unavailable") return 0;
   return a.order_qty;
 }
+// 부가세 분해. 매입가는 부가세 포함, 납품가는 부가세 별도로 잡는다.
+// 마진은 공급가액끼리 뺀 값(공급가액 - 매입공급가액) — 주문 내역 화면의 "마진(공급가액 기준)"과 같은 기준이다.
+function vatOf(totalPurchase: number, totalSupply: number) {
+  const purchaseSupply = Math.round(totalPurchase / 1.1);
+  const supplyVat = Math.round(totalSupply * 0.1);
+  return {
+    totalPurchase,
+    purchaseSupply,
+    purchaseVat: totalPurchase - purchaseSupply,
+    totalSupply,
+    supplyVat,
+    billed: totalSupply + supplyVat,
+    margin: totalSupply - purchaseSupply,
+  };
+}
 const won = (n: number) => `${Math.round(n).toLocaleString()}원`;
 // 규칙형 거래처 자동 배송비: 소계가 무료기준 이상이면 0, 아니면 정액
 function autoShip(g: { policy: string; freeMin: number; flatFee: number; subtotal: number }): number {
@@ -539,6 +554,7 @@ export default function SourcingDetailPage() {
           const label = d.product ? `${d.product.name}${d.product.spec ? ` ${d.product.spec}` : ""}` : d.raw_name;
           const price = a.unit_price ?? 0;
           const supply = d.supply_price ?? d.product?.supply_price ?? 0; // 품목별 덮어쓰기 우선, 없으면 품목마스터
+          const v = vatOf(qty * price, qty * supply);
           lineItems.push({
             order_id: "",
             product_id: d.product_id,
@@ -546,15 +562,20 @@ export default function SourcingDetailPage() {
             raw_product_name: label,
             quantity: qty,
             purchase_price: price,
-            total_purchase: qty * price,
+            total_purchase: v.totalPurchase,
+            purchase_supply: v.purchaseSupply,
+            purchase_vat: v.purchaseVat,
             supply_price: supply,
-            total_supply: qty * supply,
-            margin: (supply - price) * qty,
+            total_supply: v.totalSupply,
+            supply_vat: v.supplyVat,
+            billed_amount: v.billed,
+            margin: v.margin,
           });
         }
       }
-      // 배송비는 매입만 있고 납품가 0 → 마진 -배송비 (주문 관리와 동일 규칙)
+      // 배송비는 매입만 있고 납품가 0 → 마진은 매입 공급가액만큼 마이너스
       if (fee > 0) {
+        const v = vatOf(fee, 0);
         lineItems.push({
           order_id: "",
           product_id: null,
@@ -562,15 +583,21 @@ export default function SourcingDetailPage() {
           raw_product_name: "배송비",
           quantity: 1,
           purchase_price: fee,
-          total_purchase: fee,
+          total_purchase: v.totalPurchase,
+          purchase_supply: v.purchaseSupply,
+          purchase_vat: v.purchaseVat,
           supply_price: 0,
           total_supply: 0,
-          margin: -fee,
+          supply_vat: 0,
+          billed_amount: 0,
+          margin: v.margin,
         });
       }
       if (lineItems.length > 0) {
-        const totalPurchase = lineItems.reduce((s, it) => s + (it.total_purchase ?? 0), 0);
-        const totalSupply = lineItems.reduce((s, it) => s + (it.total_supply ?? 0), 0);
+        const sum = (k: keyof (typeof lineItems)[number]) =>
+          lineItems.reduce((s, it) => s + ((it[k] as number | null) ?? 0), 0);
+        const totalPurchase = sum("total_purchase");
+        const totalSupply = sum("total_supply");
         const { data: ord, error: oErr } = await supabase
           .from("orders")
           .insert({
@@ -581,8 +608,11 @@ export default function SourcingDetailPage() {
             category,
             vendor_name: g.name,
             total_purchase_amount: totalPurchase,
+            total_purchase_supply: sum("purchase_supply"),
             total_supply_amount: totalSupply,
-            total_margin: totalSupply - totalPurchase,
+            total_supply_vat: sum("supply_vat"),
+            total_billed: sum("billed_amount"),
+            total_margin: sum("margin"),
             note: `소싱 자동 반영${job?.title ? ` · ${job.title}` : ""}`,
           })
           .select("id")

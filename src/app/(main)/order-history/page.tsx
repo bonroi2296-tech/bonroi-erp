@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { Fragment, useEffect, useState, useMemo, useCallback } from "react";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { Search, Download, Filter, ChevronDown, ChevronUp } from "lucide-react";
@@ -24,6 +24,7 @@ interface OrderHistoryRow {
   billed_amount: number;
   margin: number;
   edi_code: string;
+  note: string;
 }
 
 interface Branch {
@@ -47,6 +48,20 @@ export default function OrderHistoryPage() {
   const [categoryFilter, setCategoryFilter] = useState<"" | "양방" | "한방">("");
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilters, setShowFilters] = useState(true);
+  // 메모: 값이 있는 줄만 보이고, 없으면 줄에 마우스를 올렸을 때만 + 가 뜬다.
+  const [editingNote, setEditingNote] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+
+  const saveNote = async (rowId: string) => {
+    const text = noteDraft.trim();
+    const { error } = await supabase
+      .from("order_items")
+      .update({ note: text || null })
+      .eq("id", rowId);
+    setEditingNote(null);
+    if (error) return;
+    setRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, note: text } : r)));
+  };
   const [showVendorPivot, setShowVendorPivot] = useState(false);
 
   // 마지막으로 쓴 필터를 기억(매번 다시 설정 안 하도록)
@@ -100,7 +115,7 @@ export default function OrderHistoryPage() {
       .select(`
         order_date, vendor_name, category,
         branches!inner(short_name),
-        order_items(id, raw_product_name, quantity, purchase_price, total_purchase, purchase_supply, supply_price, total_supply, supply_vat, billed_amount, margin, edi_code)
+        order_items(id, raw_product_name, quantity, purchase_price, total_purchase, purchase_supply, supply_price, total_supply, supply_vat, billed_amount, margin, edi_code, note)
       `)
       .order("order_date", { ascending: false });
 
@@ -125,6 +140,7 @@ export default function OrderHistoryPage() {
           billed_amount: number | null;
           margin: number;
           edi_code: string;
+          note: string | null;
         }> }).order_items || [];
 
         vendorSet.add(order.vendor_name || "");
@@ -147,6 +163,7 @@ export default function OrderHistoryPage() {
             billed_amount: item.billed_amount || 0,
             margin: item.margin || 0,
             edi_code: item.edi_code || "",
+            note: item.note || "",
           });
         }
       }
@@ -335,7 +352,7 @@ export default function OrderHistoryPage() {
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               <div>
-                <label className="text-[11px] text-gray-500 mb-1 block">시작일</label>
+                <label className="text-xs text-gray-500 mb-1 block">시작일</label>
                 <input
                   type="date"
                   value={dateFrom}
@@ -344,7 +361,7 @@ export default function OrderHistoryPage() {
                 />
               </div>
               <div>
-                <label className="text-[11px] text-gray-500 mb-1 block">종료일</label>
+                <label className="text-xs text-gray-500 mb-1 block">종료일</label>
                 <input
                   type="date"
                   value={dateTo}
@@ -353,7 +370,7 @@ export default function OrderHistoryPage() {
                 />
               </div>
               <div>
-                <label className="text-[11px] text-gray-500 mb-1 block">지점</label>
+                <label className="text-xs text-gray-500 mb-1 block">지점</label>
                 <select
                   value={branchFilter}
                   onChange={(e) => setBranchFilter(e.target.value)}
@@ -366,7 +383,7 @@ export default function OrderHistoryPage() {
                 </select>
               </div>
               <div>
-                <label className="text-[11px] text-gray-500 mb-1 block">거래처</label>
+                <label className="text-xs text-gray-500 mb-1 block">거래처</label>
                 <select
                   value={vendorFilter}
                   onChange={(e) => setVendorFilter(e.target.value)}
@@ -379,7 +396,7 @@ export default function OrderHistoryPage() {
                 </select>
               </div>
               <div>
-                <label className="text-[11px] text-gray-500 mb-1 block">구분</label>
+                <label className="text-xs text-gray-500 mb-1 block">구분</label>
                 <select
                   value={categoryFilter}
                   onChange={(e) => setCategoryFilter(e.target.value as "" | "양방" | "한방")}
@@ -391,7 +408,7 @@ export default function OrderHistoryPage() {
                 </select>
               </div>
               <div>
-                <label className="text-[11px] text-gray-500 mb-1 block">제품 검색</label>
+                <label className="text-xs text-gray-500 mb-1 block">제품 검색</label>
                 <div className="relative">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                   <input
@@ -427,32 +444,32 @@ export default function OrderHistoryPage() {
         {/* 요약 카드 */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <div className="bg-white rounded-xl border border-gray-200 p-3">
-            <p className="text-[11px] text-gray-500">건수</p>
-            <p className="text-lg font-bold text-gray-900">{summary.count.toLocaleString()}</p>
+            <p className="text-xs text-gray-500">건수</p>
+            <p className="text-xl font-bold text-gray-900">{summary.count.toLocaleString()}</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-3">
-            <p className="text-[11px] text-gray-500">매입 <span className="text-gray-400">(부가세 포함)</span></p>
-            <p className="text-lg font-bold text-gray-900">{formatPrice(summary.totalPurchase)}</p>
-            <p className="text-[10px] text-gray-400 mt-0.5">공급가액 {formatPrice(summary.totalPurchaseSupply)}</p>
+            <p className="text-xs text-gray-500">매입 <span className="text-gray-400">(부가세 포함)</span></p>
+            <p className="text-xl font-bold text-gray-900">{formatPrice(summary.totalPurchase)}</p>
+            <p className="text-xs text-gray-400 mt-0.5">공급가액 {formatPrice(summary.totalPurchaseSupply)}</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-3">
-            <p className="text-[11px] text-gray-500">납품 공급가액</p>
-            <p className="text-lg font-bold text-gray-900">{formatPrice(summary.totalSupply)}</p>
+            <p className="text-xs text-gray-500">납품 공급가액</p>
+            <p className="text-xl font-bold text-gray-900">{formatPrice(summary.totalSupply)}</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-3">
-            <p className="text-[11px] text-gray-500">부가세</p>
-            <p className="text-lg font-bold text-gray-700">{formatPrice(summary.totalSupplyVat)}</p>
+            <p className="text-xs text-gray-500">부가세</p>
+            <p className="text-xl font-bold text-gray-700">{formatPrice(summary.totalSupplyVat)}</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-3">
-            <p className="text-[11px] text-gray-500">청구액 <span className="text-gray-400">(병원 청구)</span></p>
-            <p className="text-lg font-bold text-blue-700">{formatPrice(summary.totalBilled)}</p>
+            <p className="text-xs text-gray-500">청구액 <span className="text-gray-400">(병원 청구)</span></p>
+            <p className="text-xl font-bold text-blue-700">{formatPrice(summary.totalBilled)}</p>
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-3">
-            <p className="text-[11px] text-gray-500">마진 <span className="text-gray-400">(공급가액 기준)</span></p>
-            <p className={`text-lg font-bold ${summary.totalMargin >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+            <p className="text-xs text-gray-500">마진 <span className="text-gray-400">(공급가액 기준)</span></p>
+            <p className={`text-xl font-bold ${summary.totalMargin >= 0 ? "text-emerald-600" : "text-red-600"}`}>
               {formatPrice(summary.totalMargin)}
             </p>
-            <p className="text-[10px] text-gray-400 mt-0.5">
+            <p className="text-xs text-gray-400 mt-0.5">
               {summary.totalSupply ? `${((summary.totalMargin / summary.totalSupply) * 100).toFixed(1)}%` : "-"}
             </p>
           </div>
@@ -474,7 +491,7 @@ export default function OrderHistoryPage() {
               ) : (
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-gray-50 border-b border-gray-200 text-[11px] text-gray-500 uppercase">
+                    <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase">
                       <th className="text-left px-3 py-2 whitespace-nowrap">거래처</th>
                       <th className="text-right px-2 py-2 whitespace-nowrap">건수</th>
                       <th className="text-right px-2 py-2 whitespace-nowrap">총매입가</th>
@@ -487,17 +504,17 @@ export default function OrderHistoryPage() {
                     {vendorSummary.map((v) => (
                       <tr key={v.vendor} className="hover:bg-blue-50/40 transition-colors">
                         <td className="px-3 py-1.5 whitespace-nowrap">
-                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${vendorColor(v.vendor)}`}>
+                          <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${vendorColor(v.vendor)}`}>
                             {v.vendor}
                           </span>
                         </td>
-                        <td className="px-2 py-1.5 text-right text-gray-600 text-xs">{v.count.toLocaleString()}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-700 text-xs">{formatPrice(v.purchase)}</td>
-                        <td className="px-2 py-1.5 text-right text-gray-700 text-xs">{formatPrice(v.supply)}</td>
-                        <td className={`px-2 py-1.5 text-right font-medium text-xs ${v.margin > 0 ? "text-emerald-600" : v.margin < 0 ? "text-red-600" : "text-gray-400"}`}>
+                        <td className="px-2 py-2 text-right text-gray-600 text-sm">{v.count.toLocaleString()}</td>
+                        <td className="px-2 py-2 text-right text-gray-700 text-sm">{formatPrice(v.purchase)}</td>
+                        <td className="px-2 py-2 text-right text-gray-700 text-sm">{formatPrice(v.supply)}</td>
+                        <td className={`px-2 py-2 text-right font-semibold text-sm ${v.margin > 0 ? "text-emerald-600" : v.margin < 0 ? "text-red-600" : "text-gray-400"}`}>
                           {formatPrice(v.margin)}
                         </td>
-                        <td className="px-3 py-1.5 text-right text-gray-500 text-xs">
+                        <td className="px-3 py-2 text-right text-gray-500 text-sm">
                           {v.supply ? `${((v.margin / v.supply) * 100).toFixed(1)}%` : "-"}
                         </td>
                       </tr>
@@ -519,7 +536,7 @@ export default function OrderHistoryPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200 text-[11px] text-gray-500 uppercase">
+                  <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase">
                     <th
                       className="text-left px-3 py-2 cursor-pointer hover:text-gray-700 whitespace-nowrap"
                       onClick={() => toggleSort("order_date")}
@@ -568,38 +585,85 @@ export default function OrderHistoryPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {filteredRows.map((r) => (
-                    <tr key={r.id} className="hover:bg-blue-50/40 transition-colors">
-                      <td className="px-2.5 py-1 text-gray-600 whitespace-nowrap text-xs">{formatDate(r.order_date)}</td>
-                      <td className="px-2 py-1 whitespace-nowrap">
-                        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${branchColor(r.branch_short)}`}>
+                    <Fragment key={r.id}>
+                    <tr className="group hover:bg-blue-50/40 transition-colors">
+                      <td className="px-2.5 py-2 text-gray-600 whitespace-nowrap text-sm">{formatDate(r.order_date)}</td>
+                      <td className="px-2 py-2 whitespace-nowrap">
+                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${branchColor(r.branch_short)}`}>
                           {r.branch_short}
                         </span>
                       </td>
-                      <td className="px-2 py-1 whitespace-nowrap">
+                      <td className="px-2 py-2 whitespace-nowrap">
                         {r.vendor_name && (
-                          <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${vendorColor(r.vendor_name)}`}>
+                          <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${vendorColor(r.vendor_name)}`}>
                             {r.vendor_name}
                           </span>
                         )}
                       </td>
-                      <td className="px-2 py-1 text-gray-900 font-medium max-w-[280px] truncate text-xs">{r.raw_product_name}</td>
-                      <td className="px-2 py-1 text-right text-gray-700 text-xs">{r.quantity}</td>
-                      <td className="px-2 py-1 text-right text-gray-500 text-xs">{formatPrice(r.purchase_price)}</td>
-                      <td className="px-2 py-1 text-right text-gray-700 text-xs">{formatPrice(r.total_purchase)}</td>
-                      <td className="px-2 py-1 text-right text-gray-500 text-xs">{formatPrice(r.supply_price)}</td>
-                      <td className="px-2 py-1 text-right text-gray-700 text-xs">{formatPrice(r.total_supply)}</td>
-                      <td className="px-2 py-1 text-right text-gray-500 text-xs">{formatPrice(r.supply_vat)}</td>
-                      <td className="px-2 py-1 text-right text-blue-700 font-medium text-xs">{formatPrice(r.billed_amount)}</td>
+                      <td className="px-2 py-2 text-gray-900 font-medium max-w-[340px] text-sm">
+                        <div className="flex items-center gap-1">
+                          <span className="truncate">{r.raw_product_name}</span>
+                          {!r.note && editingNote !== r.id && (
+                            <button
+                              onClick={() => { setEditingNote(r.id); setNoteDraft(""); }}
+                              title="메모 추가"
+                              className="flex-shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity px-1.5 rounded text-xs text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                            >
+                              + 메모
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-2 py-2 text-right text-gray-700 text-sm">{r.quantity}</td>
+                      <td className="px-2 py-2 text-right text-gray-500 text-sm">{formatPrice(r.purchase_price)}</td>
+                      <td className="px-2 py-2 text-right text-gray-700 text-sm">{formatPrice(r.total_purchase)}</td>
+                      <td className="px-2 py-2 text-right text-gray-500 text-sm">{formatPrice(r.supply_price)}</td>
+                      <td className="px-2 py-2 text-right text-gray-700 text-sm">{formatPrice(r.total_supply)}</td>
+                      <td className="px-2 py-2 text-right text-gray-500 text-sm">{formatPrice(r.supply_vat)}</td>
+                      <td className="px-2 py-2 text-right text-blue-700 font-semibold text-sm">{formatPrice(r.billed_amount)}</td>
                       <td
-                        className={`px-2 py-1 text-right font-medium text-xs ${
+                        className={`px-2 py-2 text-right font-semibold text-sm ${
                           r.margin > 0 ? "text-emerald-600" : r.margin < 0 ? "text-red-600" : "text-gray-400"
                         }`}
                       >
                         {formatPrice(r.margin)}
                       </td>
-                      <td className="px-2 py-1 text-right text-gray-500 text-xs">{marginRate(r)}</td>
-                      <td className="px-2 py-1 text-gray-400 text-[11px]">{r.edi_code}</td>
+                      <td className="px-2 py-2 text-right text-gray-500 text-sm">{marginRate(r)}</td>
+                      <td className="px-2 py-2 text-gray-400 text-xs">{r.edi_code}</td>
                     </tr>
+                    {/* 메모는 줄 아래에 한 칸 통째로 깔린다. 값이 있거나 지금 쓰는 중일 때만 나온다. */}
+                    {(r.note || editingNote === r.id) && (
+                      <tr className="bg-amber-50/50">
+                        {/* 앞 3열(날짜·지점·거래처)을 비워 제품명 바로 아래에서 시작하게 한다 */}
+                        <td colSpan={3} />
+                        <td colSpan={11} className="px-2 pb-2 pt-0">
+                          {editingNote === r.id ? (
+                            <input
+                              autoFocus
+                              value={noteDraft}
+                              onChange={(e) => setNoteDraft(e.target.value)}
+                              onBlur={() => saveNote(r.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveNote(r.id);
+                                if (e.key === "Escape") setEditingNote(null);
+                              }}
+                              placeholder="예: 144개 = 3카톤 (48개 기준).  Enter 저장 · Esc 취소"
+                              className="w-full max-w-2xl px-2.5 py-1.5 border border-blue-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          ) : (
+                            <button
+                              onClick={() => { setEditingNote(r.id); setNoteDraft(r.note); }}
+                              title="눌러서 고치기"
+                              className="text-left text-sm text-amber-900 hover:underline"
+                            >
+                              <span className="text-amber-500 mr-1">↳</span>
+                              {r.note}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
