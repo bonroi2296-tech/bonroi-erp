@@ -551,7 +551,8 @@ export default function SourcingDetailPage() {
           const qty = billedQty(a);
           if (qty <= 0) continue;
           if (d.product?.category) category = d.product.category;
-          const label = d.product ? `${d.product.name}${d.product.spec ? ` ${d.product.spec}` : ""}` : d.raw_name;
+          // 거래명세서가 " ㅡ " 로 품목명/규격을 나누므로 저장할 때 구분자를 넣는다
+          const label = d.product ? `${d.product.name}${d.product.spec ? ` ㅡ ${d.product.spec}` : ""}` : d.raw_name;
           const price = a.unit_price ?? 0;
           const supply = d.supply_price ?? d.product?.supply_price ?? 0; // 품목별 덮어쓰기 우선, 없으면 품목마스터
           const v = vatOf(qty * price, qty * supply);

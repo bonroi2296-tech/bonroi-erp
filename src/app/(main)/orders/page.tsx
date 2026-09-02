@@ -325,7 +325,8 @@ export default function OrdersPage() {
       ...prev,
       {
         product_id: addProductId,
-        product_name: product.name,
+        // 거래명세서가 " ㅡ " 로 품목명/규격을 나눈다
+        product_name: `${product.name}${product.spec ? ` ㅡ ${product.spec}` : ""}`,
         vendor_id: addVendorId,
         vendor_name: vendor.name,
         quantity: addQuantity,
