@@ -62,6 +62,7 @@ interface Product {
   spec: string;
   category: string;
   supply_price: number | null;
+  edi_code: string | null;
 }
 
 interface Vendor {
@@ -80,6 +81,7 @@ interface VendorPrice {
 interface NewOrderItem {
   product_id: string;
   product_name: string;
+  edi_code: string | null;
   vendor_id: string;
   vendor_name: string;
   quantity: number;
@@ -218,7 +220,7 @@ export default function OrdersPage() {
     // 기초 데이터 로드
     const [branchRes, productRes, vendorRes] = await Promise.all([
       supabase.from("branches").select("id, name, short_name"),
-      supabase.from("products").select("id, name, spec, category, supply_price").order("name"),
+      supabase.from("products").select("id, name, spec, category, supply_price, edi_code").order("name"),
       supabase.from("vendors").select("id, name, category").order("name"),
     ]);
     setBranches((branchRes.data as Branch[]) || []);
@@ -327,6 +329,7 @@ export default function OrdersPage() {
         product_id: addProductId,
         // 거래명세서가 " ㅡ " 로 품목명/규격을 나눈다
         product_name: `${product.name}${product.spec ? ` ㅡ ${product.spec}` : ""}`,
+        edi_code: product.edi_code,
         vendor_id: addVendorId,
         vendor_name: vendor.name,
         quantity: addQuantity,
@@ -417,6 +420,7 @@ export default function OrdersPage() {
           product_id: item.product_id,
           vendor_id: item.vendor_id,
           raw_product_name: item.product_name,
+          edi_code: item.edi_code,
           quantity: item.quantity,
           purchase_price: item.purchase_price,
           total_purchase: item.purchase_price * item.quantity,

@@ -532,14 +532,14 @@ export default function SourcingDetailPage() {
       const { data: dls } = await supabase
         .from("demand_lines")
         .select(
-          "id, raw_name, product_id, supply_price, product:products(name, spec, category, supply_price), sourcing_allocations(id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty)"
+          "id, raw_name, product_id, supply_price, product:products(name, spec, category, supply_price, edi_code), sourcing_allocations(id, vendor_id, vendor_label, order_qty, unit_price, status, shipped_qty)"
         )
         .eq("job_id", id);
       type DRow = {
         raw_name: string;
         product_id: string | null;
         supply_price: number | null;
-        product: { name: string; spec: string | null; category: string | null; supply_price: number | null } | null;
+        product: { name: string; spec: string | null; category: string | null; supply_price: number | null; edi_code: string | null } | null;
         sourcing_allocations: Alloc[];
       };
       const lineItems: TablesInsert<"order_items">[] = [];
@@ -561,6 +561,7 @@ export default function SourcingDetailPage() {
             product_id: d.product_id,
             vendor_id: g.vendor_id,
             raw_product_name: label,
+            edi_code: d.product?.edi_code ?? null,
             quantity: qty,
             purchase_price: price,
             total_purchase: v.totalPurchase,
