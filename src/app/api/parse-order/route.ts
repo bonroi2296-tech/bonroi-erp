@@ -201,7 +201,8 @@ export async function POST(request: Request) {
     const [histRes, vpRes, vssRes] = await Promise.all([
       supabase.from("order_items").select("product_id, orders(order_date, branch_id)").in("product_id", matchedIds),
       supabase.from("vendor_products").select("product_id, unit_price, vendor:vendors(id, name)").in("product_id", matchedIds),
-      supabase.from("vendor_supply_status").select("product_id, vendor:vendors(name)").in("product_id", matchedIds),
+      // 행이 남아 있어도 '품절'이 아니면 제외하지 않는다
+      supabase.from("vendor_supply_status").select("product_id, vendor:vendors(name)").eq("supply_status", "품절").in("product_id", matchedIds),
     ]);
     for (const r of (histRes.data as unknown as { product_id: string; orders: { order_date: string; branch_id: string | null } | null }[]) || []) {
       if (!r.product_id) continue;

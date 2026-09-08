@@ -24,7 +24,7 @@ const navItems: NavItem[] = [
   { href: "/vendors", icon: Truck, label: "벤더 관리" },
   { href: "/supply-monitor", icon: ShieldAlert, label: "공급망 관리" },
   { href: "/purchase", icon: Send, label: "발주 관리", hidden: true },
-  { href: "/returns", icon: RotateCcw, label: "반품 관리", hidden: true },
+  { href: "/returns", icon: RotateCcw, label: "반품 관리" },
   { href: "/documents", icon: FileText, label: "문서 생성", hidden: true },
   { href: "/analytics", icon: BarChart3, label: "분석/리포트", hidden: true },
   { href: "/guide", icon: HelpCircle, label: "사용 가이드" },

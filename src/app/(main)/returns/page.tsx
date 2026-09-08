@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import TopBar from "@/components/TopBar";
 import { useToast } from "@/components/Toast";
 import { supabase } from "@/lib/supabase";
+import type { TablesInsert } from "@/lib/database.types";
 import { Plus, Search, X } from "lucide-react";
 
 interface Return {
@@ -37,8 +38,15 @@ interface OrderItem {
   product_id: string;
   quantity: number;
   purchase_price: number;
+  supply_price: number | null;
+  raw_product_name: string | null;
+  edi_code: string | null;
   order_ref?: {
+    id: string;
     order_date: string;
+    category: string | null;
+    vendor_name: string | null;
+    branch_id: string | null;
     branch_ref?: {
       name: string;
     };
@@ -144,13 +152,112 @@ export default function ReturnsPage() {
     const { data } = await supabase
       .from("order_items")
       .select(
-        `id, quantity, purchase_price,
-        order_ref:orders(order_date, branch_ref:branches(name)),
+        `id, product_id, quantity, purchase_price, supply_price, raw_product_name, edi_code,
+        order_ref:orders(id, order_date, category, vendor_name, branch_id, branch_ref:branches(name)),
         product:products(name, spec)`
       )
       .limit(500);
 
     setOrderItems((data as unknown as OrderItem[]) || []);
+  }
+
+  // 반품은 주문 내역에 마이너스 줄로 남겨야 매입·매출·마진에 반영된다.
+  // 원주문과 같은 지점·거래처로 새 주문을 만들고 품목명 뒤에 "반품"을 붙인다.
+  async function writeReturnToLedger(
+    item: OrderItem,
+    form: { quantity: number; return_cost: number; charge_cost: boolean }
+  ): Promise<string | null> {
+    const order = item.order_ref;
+    if (!order?.branch_id) return "원주문의 지점 정보가 없어요.";
+
+    const qty = form.quantity;
+    const purchase = -(qty * (item.purchase_price || 0));
+    const purchaseSupply = Math.round(purchase / 1.1);
+    const supply = -(qty * (item.supply_price || 0));
+    const supplyVat = Math.round(supply * 0.1);
+
+    const rows: TablesInsert<"order_items">[] = [
+      {
+        order_id: "",
+        product_id: item.product_id || null,
+        raw_product_name: `${item.raw_product_name || item.product?.name || "품목"} 반품`,
+        edi_code: item.edi_code,
+        quantity: -qty,
+        purchase_price: item.purchase_price,
+        total_purchase: purchase,
+        purchase_supply: purchaseSupply,
+        purchase_vat: purchase - purchaseSupply,
+        supply_price: item.supply_price,
+        total_supply: supply,
+        supply_vat: supplyVat,
+        billed_amount: supply + supplyVat,
+        margin: supply - purchaseSupply,
+        item_status: "도착",
+      },
+    ];
+
+    if (form.return_cost > 0) {
+      const feeSupply = Math.round(form.return_cost / 1.1);
+      const billed = form.charge_cost ? Math.round(form.return_cost * 1.1) : 0;
+      rows.push({
+        order_id: "",
+        raw_product_name: "반품배송비",
+        quantity: 1,
+        purchase_price: form.return_cost,
+        total_purchase: form.return_cost,
+        purchase_supply: feeSupply,
+        purchase_vat: form.return_cost - feeSupply,
+        supply_price: form.charge_cost ? form.return_cost : 0,
+        total_supply: form.charge_cost ? form.return_cost : 0,
+        supply_vat: billed - (form.charge_cost ? form.return_cost : 0),
+        billed_amount: billed,
+        margin: (form.charge_cost ? form.return_cost : 0) - feeSupply,
+        item_status: "도착",
+      });
+    }
+
+    const sum = (k: keyof TablesInsert<"order_items">) =>
+      rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+
+    const { data: created, error: orderError } = await supabase
+      .from("orders")
+      .insert({
+        order_number: await nextOrderNumber(),
+        order_date: new Date().toISOString().slice(0, 10),
+        branch_id: order.branch_id,
+        vendor_name: order.vendor_name,
+        category: order.category ?? "양방",
+        status: "완료",
+        total_purchase_amount: sum("total_purchase"),
+        total_purchase_supply: sum("purchase_supply"),
+        total_supply_amount: sum("total_supply"),
+        total_supply_vat: sum("supply_vat"),
+        total_billed: sum("billed_amount"),
+        total_margin: sum("margin"),
+      })
+      .select("id")
+      .single();
+
+    if (orderError || !created) return orderError?.message ?? "주문 생성 실패";
+
+    const { error: itemError } = await supabase
+      .from("order_items")
+      .insert(rows.map((r) => ({ ...r, order_id: created.id })));
+    if (itemError) return itemError.message;
+    return null;
+  }
+
+  async function nextOrderNumber(): Promise<string> {
+    const { data, error } = await supabase.rpc("next_order_number");
+    if (!error && typeof data === "string") return data;
+    const { data: maxOrder } = await supabase
+      .from("orders")
+      .select("order_number")
+      .order("order_number", { ascending: false })
+      .limit(1);
+    const m = maxOrder?.[0]?.order_number?.match(/ORD-\d{4}-(\d+)/);
+    const n = m ? parseInt(m[1]) : 0;
+    return `ORD-${new Date().getFullYear()}-${String(n + 1).padStart(4, "0")}`;
   }
 
   async function handleCreateReturn() {
@@ -180,6 +287,13 @@ export default function ReturnsPage() {
     if (error) {
       toast.error("반품 등록 실패: " + error.message);
       return;
+    }
+
+    const ledgerError = await writeReturnToLedger(selectedOrderItem, formData);
+    if (ledgerError) {
+      toast.error("반품은 등록했는데 주문 내역 반영에 실패했어요: " + ledgerError);
+    } else {
+      toast.success("반품을 등록하고 주문 내역에 마이너스로 반영했어요.");
     }
 
     // Reset form

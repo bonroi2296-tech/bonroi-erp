@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import TopBar from "@/components/TopBar";
+import { useToast } from "@/components/Toast";
 import { supabase } from "@/lib/supabase";
-import { Search, ExternalLink } from "lucide-react";
+import { Search, ExternalLink, Plus, X } from "lucide-react";
 
 interface Vendor {
   id: string;
@@ -16,22 +17,68 @@ interface Vendor {
   vendor_products: { id: string }[];
 }
 
+const CATEGORIES = ["양방", "한방", "공통"];
+
 export default function VendorsPage() {
+  const toast = useToast();
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState<string>("");
 
-  useEffect(() => {
-    async function fetchVendors() {
-      const { data } = await supabase
-        .from("vendors")
-        .select("id, name, category, payment_method, delivery_note, website_url, auto_order_enabled, vendor_products(id)")
-        .order("name");
-      setVendors((data as unknown as Vendor[]) || []);
-      setLoading(false);
-    }
-    fetchVendors();
+  const [showModal, setShowModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState("양방");
+  const [payment, setPayment] = useState("");
+  const [shippingFee, setShippingFee] = useState("");
+  const [freeMin, setFreeMin] = useState("");
+  const [website, setWebsite] = useState("");
+
+  const fetchVendors = useCallback(async () => {
+    const { data } = await supabase
+      .from("vendors")
+      .select("id, name, category, payment_method, delivery_note, website_url, auto_order_enabled, vendor_products(id)")
+      .order("name");
+    setVendors((data as unknown as Vendor[]) || []);
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    fetchVendors();
+  }, [fetchVendors]);
+
+  const openModal = () => {
+    setName("");
+    setCategory("양방");
+    setPayment("");
+    setShippingFee("");
+    setFreeMin("");
+    setWebsite("");
+    setShowModal(true);
+  };
+
+  const save = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) return toast.error("거래처 이름을 입력하세요.");
+    if (vendors.some((v) => v.name.trim() === trimmed)) {
+      return toast.error("이미 등록된 거래처예요.");
+    }
+    setSaving(true);
+    const { error } = await supabase.from("vendors").insert({
+      name: trimmed,
+      category,
+      payment_method: payment.trim() || null,
+      shipping_fee: Number(shippingFee) || 0,
+      free_shipping_min: Number(freeMin) || 0,
+      website_url: website.trim() || null,
+      auto_order_enabled: false,
+    });
+    setSaving(false);
+    if (error) return toast.error(error.message);
+    toast.success(`${trimmed} 등록했어요.`);
+    setShowModal(false);
+    fetchVendors();
+  };
 
   const filtered = vendors.filter(v => {
     const search = searchTerm.toLowerCase();
@@ -56,6 +103,12 @@ export default function VendorsPage() {
               placeholder="벤더명 검색..."
             />
           </div>
+          <button
+            onClick={openModal}
+            className="ml-auto flex items-center gap-1.5 px-3 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800"
+          >
+            <Plus className="w-4 h-4" /> 거래처 추가
+          </button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
@@ -95,6 +148,103 @@ export default function VendorsPage() {
           )}
         </div>
       </div>
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-md">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+              <h2 className="font-bold text-gray-900">거래처 추가</h2>
+              <button onClick={() => setShowModal(false)} className="text-gray-500 hover:text-gray-900">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">거래처 이름</label>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="예: 우진헬스케어"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">구분</label>
+                <div className="flex gap-2">
+                  {CATEGORIES.map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => setCategory(c)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+                        category === c ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200"
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">결제방법</label>
+                <input
+                  value={payment}
+                  onChange={(e) => setPayment(e.target.value)}
+                  placeholder="예: 무통장입금 / 월 결제"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">배송비</label>
+                  <input
+                    value={shippingFee}
+                    onChange={(e) => setShippingFee(e.target.value)}
+                    type="number"
+                    min={0}
+                    placeholder="0"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">무료배송 기준</label>
+                  <input
+                    value={freeMin}
+                    onChange={(e) => setFreeMin(e.target.value)}
+                    type="number"
+                    min={0}
+                    placeholder="0"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">홈페이지</label>
+                <input
+                  value={website}
+                  onChange={(e) => setWebsite(e.target.value)}
+                  placeholder="https://"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200">
+              <button
+                onClick={() => setShowModal(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900"
+              >
+                취소
+              </button>
+              <button
+                onClick={save}
+                disabled={saving}
+                className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
+              >
+                {saving ? "저장 중..." : "등록"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

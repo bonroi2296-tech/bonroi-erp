@@ -86,6 +86,140 @@ interface VendorGroup {
   allocs: Alloc[];
   items: VendorItem[];
 }
+
+// ===== 품목 매칭 교체 =====
+// 확보 관리에서 품목을 손으로 추가하면 제품이 안 붙는다. 여기서 다시 매칭한다.
+function ProductMatch({
+  demand,
+  onMatch,
+  onReprice,
+}: {
+  demand: Demand;
+  onMatch: (productId: string | null) => void;
+  onReprice: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [term, setTerm] = useState("");
+  const [hits, setHits] = useState<{ id: string; name: string; spec: string | null }[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const q = term.trim();
+    if (q.length < 2) {
+      setHits([]);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      setSearching(true);
+      const safe = q.replace(/[%,]/g, "");
+      const { data } = await supabase
+        .from("products")
+        .select("id, name, spec")
+        .or(`name.ilike.%${safe}%,spec.ilike.%${safe}%`)
+        .order("name")
+        .limit(20);
+      if (cancelled) return;
+      setHits(data || []);
+      setSearching(false);
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [term, open]);
+
+  const label = demand.product
+    ? `${demand.product.name}${demand.product.spec ? ` ${demand.product.spec}` : ""}`
+    : null;
+
+  return (
+    <div className="text-xs" onClick={(e) => e.stopPropagation()}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-gray-400">매칭 제품</span>
+        {label ? (
+          <span className="font-medium text-gray-900">{label}</span>
+        ) : (
+          <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">매칭 필요</span>
+        )}
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="px-2 py-1 border border-gray-200 rounded-md bg-white hover:bg-gray-50"
+        >
+          {open ? "닫기" : label ? "바꾸기" : "제품 찾기"}
+        </button>
+        {demand.product_id && demand.sourcing_allocations.length > 0 && (
+          <button
+            type="button"
+            onClick={onReprice}
+            className="px-2 py-1 border border-gray-200 rounded-md bg-white hover:bg-gray-50"
+            title="배정된 거래처 단가를 이 제품의 등록 단가로 다시 잡습니다"
+          >
+            단가 다시 잡기
+          </button>
+        )}
+      </div>
+
+      {demand.product_id && demand.sourcing_allocations.length > 0 && (
+        <p className="mt-1 text-[11px] text-amber-700">
+          제품을 바꾸면 이미 잡힌 배정 단가는 그대로예요. 「단가 다시 잡기」를 눌러 맞춰주세요.
+        </p>
+      )}
+
+      {open && (
+        <div className="mt-2 p-2 bg-white border border-gray-200 rounded-lg space-y-2">
+          <input
+            value={term}
+            onChange={(e) => setTerm(e.target.value)}
+            placeholder="품목명 검색 (두 글자 이상)"
+            className="w-full px-2 py-1.5 border border-gray-200 rounded-md text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+          />
+          {searching ? (
+            <p className="text-[11px] text-gray-400 px-1">찾는 중...</p>
+          ) : hits.length === 0 ? (
+            <p className="text-[11px] text-gray-400 px-1">
+              {term.trim().length < 2 ? "두 글자 이상 입력하세요" : "결과가 없어요. 제품 화면에서 먼저 등록해주세요."}
+            </p>
+          ) : (
+            <ul className="max-h-48 overflow-auto divide-y divide-gray-100">
+              {hits.map((h) => (
+                <li key={h.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onMatch(h.id);
+                      setOpen(false);
+                      setTerm("");
+                    }}
+                    className="w-full text-left px-2 py-1.5 hover:bg-blue-50 rounded"
+                  >
+                    <span className="font-medium text-gray-900">{h.name}</span>
+                    {h.spec && <span className="text-gray-500"> {h.spec}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {demand.product_id && (
+            <button
+              type="button"
+              onClick={() => {
+                onMatch(null);
+                setOpen(false);
+              }}
+              className="text-[11px] text-gray-500 hover:text-red-600 px-1"
+            >
+              매칭 지우기
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ReconcileRow {
   demand_line_id: string | null;
   product_id: string | null;
@@ -234,9 +368,11 @@ export default function SourcingDetailPage() {
             .from("vendor_products")
             .select("product_id, vendor_id, unit_price, vendor:vendors(name)")
             .in("product_id", productIds),
+          // 행이 남아 있어도 '품절'이 아니면 배정을 막지 않는다
           supabase
             .from("vendor_supply_status")
             .select("product_id, vendor_id")
+            .eq("supply_status", "품절")
             .in("product_id", productIds),
         ]);
         const blocked = new Set(
@@ -334,6 +470,40 @@ export default function SourcingDetailPage() {
     if (v === (d.supply_price ?? null)) return;
     const { error } = await supabase.from("demand_lines").update({ supply_price: v }).eq("id", d.id);
     if (error) return toast.error(error.message);
+    fetchJob();
+  };
+
+  // 품목을 다른 제품으로 매칭. 기존 배정 단가는 새 제품 기준이 아니므로 그대로 두고 화면에서 경고한다.
+  const matchProduct = async (d: Demand, productId: string | null) => {
+    const { error } = await supabase
+      .from("demand_lines")
+      .update({ product_id: productId, supply_price: null })
+      .eq("id", d.id);
+    if (error) return toast.error(error.message);
+    toast.success(productId ? "제품을 다시 매칭했어요." : "매칭을 지웠어요.");
+    fetchJob();
+  };
+
+  // 새로 매칭한 제품의 최저가로 배정 단가를 다시 잡는다
+  const repriceAllocs = async (d: Demand) => {
+    if (!d.product_id) return;
+    const opts = (vendorOptions[d.product_id] ?? []).filter((o) => o.available && o.price != null);
+    if (!opts.length) return toast.error("이 제품은 등록된 매입단가가 없어요.");
+    const failed: string[] = [];
+    for (const a of d.sourcing_allocations) {
+      const hit = opts.find((o) => o.vendor_id === a.vendor_id);
+      if (!hit) {
+        failed.push(a.vendor?.name ?? a.vendor_label ?? "미지정");
+        continue;
+      }
+      const { error } = await supabase
+        .from("sourcing_allocations")
+        .update({ unit_price: hit.price, updated_at: new Date().toISOString() })
+        .eq("id", a.id);
+      if (error) failed.push(a.vendor?.name ?? "?");
+    }
+    if (failed.length) toast.error(`단가를 못 잡은 거래처: ${failed.join(", ")}. 거래처를 바꾸거나 직접 넣어주세요.`);
+    else toast.success("배정 단가를 새 제품 기준으로 맞췄어요.");
     fetchJob();
   };
 
@@ -1027,6 +1197,11 @@ export default function SourcingDetailPage() {
                                 )}
                               </div>
                             </div>
+                            <ProductMatch
+                              demand={d}
+                              onMatch={(pid) => matchProduct(d, pid)}
+                              onReprice={() => repriceAllocs(d)}
+                            />
                             <AllocTable
                               allocs={d.sourcing_allocations}
                               requiredQty={d.required_qty}
