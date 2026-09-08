@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import TopBar from "@/components/TopBar";
 import { useToast } from "@/components/Toast";
 import { supabase } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/format";
-import { Search, X, Plus, Trash2, TrendingDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, X, Plus, Trash2, TrendingDown, Truck, ChevronLeft, ChevronRight } from "lucide-react";
 
 const PAGE_SIZE = 50;
 
@@ -518,6 +518,8 @@ function PriceTierModal({ product, onClose }: { product: Product; onClose: () =>
         <div className="p-6 space-y-6">
           <ProductInfoEditor product={product} />
 
+          <VendorPriceEditor productId={product.id} />
+
           {/* 기존 구간 단가 목록 */}
           <div>
             <div className="flex items-center gap-2 mb-3">
@@ -635,6 +637,213 @@ function PriceTierModal({ product, onClose }: { product: Product; onClose: () =>
 }
 
 // ===== 제품 정보(쇼핑몰 베이스) 편집 =====
+// ===== 거래처별 매입단가 =====
+// 최저가 표시가 자동으로 안 맞춰져서 값이 틀어져 있었다. 저장할 때마다 다시 계산한다.
+interface VendorPriceRow {
+  id: string;
+  vendor_id: string;
+  unit_price: number | null;
+  is_lowest: boolean | null;
+  is_excluded: boolean | null;
+  vendor: { name: string } | null;
+}
+
+function VendorPriceEditor({ productId }: { productId: string }) {
+  const toast = useToast();
+  const [rows, setRows] = useState<VendorPriceRow[]>([]);
+  const [vendors, setVendors] = useState<{ id: string; name: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [addVendor, setAddVendor] = useState("");
+  const [addPrice, setAddPrice] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const [vpRes, vRes] = await Promise.all([
+      supabase
+        .from("vendor_products")
+        .select("id, vendor_id, unit_price, is_lowest, is_excluded, vendor:vendors(name)")
+        .eq("product_id", productId),
+      supabase.from("vendors").select("id, name").order("name"),
+    ]);
+    const list = (vpRes.data as unknown as VendorPriceRow[]) || [];
+    list.sort((a, b) => (a.unit_price ?? Infinity) - (b.unit_price ?? Infinity));
+    setRows(list);
+    setVendors(vRes.data || []);
+    setLoading(false);
+  }, [productId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // 제외되지 않은 것 중 최저가 하나만 표시를 켠다
+  async function recomputeLowest() {
+    const { data } = await supabase
+      .from("vendor_products")
+      .select("id, unit_price, is_lowest, is_excluded")
+      .eq("product_id", productId);
+    const list =
+      (data as { id: string; unit_price: number | null; is_lowest: boolean | null; is_excluded: boolean | null }[]) || [];
+    const usable = list.filter((r) => r.unit_price != null && !r.is_excluded);
+    const min = usable.length ? Math.min(...usable.map((r) => r.unit_price as number)) : null;
+    await Promise.all(
+      list.map((r) => {
+        const next = min != null && !r.is_excluded && r.unit_price === min;
+        return r.is_lowest === next
+          ? Promise.resolve()
+          : supabase.from("vendor_products").update({ is_lowest: next }).eq("id", r.id);
+      })
+    );
+  }
+
+  async function savePrice(row: VendorPriceRow, raw: string) {
+    const v = raw.trim() === "" ? null : Number(raw);
+    if (v !== null && Number.isNaN(v)) return;
+    if (v === (row.unit_price ?? null)) return;
+    const { error } = await supabase
+      .from("vendor_products")
+      .update({ unit_price: v, last_updated: new Date().toISOString() })
+      .eq("id", row.id);
+    if (error) return toast.error(error.message);
+    await recomputeLowest();
+    await load();
+    toast.success("단가를 바꿨어요.");
+  }
+
+  async function toggleExcluded(row: VendorPriceRow) {
+    const next = !row.is_excluded;
+    const { error } = await supabase
+      .from("vendor_products")
+      .update({
+        is_excluded: next,
+        excluded_since: next ? new Date().toISOString().slice(0, 10) : null,
+        excluded_note: next ? "화면에서 제외 처리" : null,
+      })
+      .eq("id", row.id);
+    if (error) return toast.error(error.message);
+    await recomputeLowest();
+    await load();
+    toast.success(next ? "제외했어요. 자동 배정에서 빠집니다." : "제외를 풀었어요.");
+  }
+
+  async function remove(row: VendorPriceRow) {
+    if (!confirm(`${row.vendor?.name ?? "이 거래처"} 단가를 지울까요?`)) return;
+    const { error } = await supabase.from("vendor_products").delete().eq("id", row.id);
+    if (error) return toast.error(error.message);
+    await recomputeLowest();
+    await load();
+    toast.success("지웠어요.");
+  }
+
+  async function add() {
+    if (!addVendor || !Number(addPrice)) return toast.error("거래처와 매입단가를 넣어주세요.");
+    if (rows.some((r) => r.vendor_id === addVendor)) return toast.error("이미 등록된 거래처예요.");
+    setBusy(true);
+    const { error } = await supabase.from("vendor_products").insert({
+      product_id: productId,
+      vendor_id: addVendor,
+      unit_price: Number(addPrice),
+      last_updated: new Date().toISOString(),
+    });
+    setBusy(false);
+    if (error) return toast.error(error.message);
+    setAddVendor("");
+    setAddPrice("");
+    await recomputeLowest();
+    await load();
+    toast.success("거래처 단가를 넣었어요.");
+  }
+
+  const unused = vendors.filter((v) => !rows.some((r) => r.vendor_id === v.id));
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <Truck className="w-4 h-4 text-blue-600" />
+        <h3 className="text-sm font-semibold text-gray-900">거래처별 매입단가</h3>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-6">
+          <div className="animate-spin w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full" />
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {rows.length === 0 && (
+            <p className="text-xs text-gray-400">
+              등록된 거래처가 없습니다. 넣어두면 확보 관리에서 단가가 자동으로 잡힙니다.
+            </p>
+          )}
+          {rows.map((r) => (
+            <div key={r.id} className="flex items-center gap-2 text-sm">
+              <span className={`flex-1 truncate ${r.is_excluded ? "text-gray-400 line-through" : "text-gray-900"}`}>
+                {r.vendor?.name ?? "?"}
+              </span>
+              {r.is_lowest && !r.is_excluded && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700">최저가</span>
+              )}
+              <input
+                type="number"
+                min={0}
+                defaultValue={r.unit_price ?? ""}
+                onBlur={(e) => savePrice(r, e.target.value)}
+                className="w-24 px-2 py-1 border border-gray-200 rounded-md text-sm text-right focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+              <button
+                onClick={() => toggleExcluded(r)}
+                className={`px-2 py-1 rounded-md text-xs border ${
+                  r.is_excluded ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-white border-gray-200 text-gray-500"
+                }`}
+                title="제외하면 자동 배정과 최저가 계산에서 빠집니다"
+              >
+                {r.is_excluded ? "제외됨" : "제외"}
+              </button>
+              <button
+                onClick={() => remove(r)}
+                className="p-1.5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50"
+                aria-label={`${r.vendor?.name ?? ""} 단가 삭제`}
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+
+          <div className="flex items-center gap-2 pt-2">
+            <select
+              value={addVendor}
+              onChange={(e) => setAddVendor(e.target.value)}
+              className="flex-1 px-2 py-1.5 border border-gray-200 rounded-md text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              <option value="">거래처 추가</option>
+              {unused.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              min={0}
+              value={addPrice}
+              onChange={(e) => setAddPrice(e.target.value)}
+              placeholder="매입단가"
+              className="w-24 px-2 py-1.5 border border-gray-200 rounded-md text-sm text-right focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <button
+              onClick={add}
+              disabled={busy}
+              className="px-3 py-1.5 bg-gray-900 text-white rounded-md text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
+            >
+              추가
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-400">칸 밖을 누르면 저장되고, 최저가 표시는 자동으로 다시 계산됩니다</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProductInfoEditor({ product }: { product: Product }) {
   const toast = useToast();
   const [imageUrl, setImageUrl] = useState(product.image_url ?? "");
