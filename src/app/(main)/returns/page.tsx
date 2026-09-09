@@ -156,6 +156,9 @@ export default function ReturnsPage() {
         order_ref:orders(id, order_date, category, vendor_name, branch_id, branch_ref:branches(name)),
         product:products(name, spec)`
       )
+      // 이미 반품된 줄(마이너스)을 또 고르면 "반품 반품" 이 생긴다. 판매 줄만 고르게 한다.
+      .gt("quantity", 0)
+      .order("id", { ascending: false })
       .limit(500);
 
     setOrderItems((data as unknown as OrderItem[]) || []);
