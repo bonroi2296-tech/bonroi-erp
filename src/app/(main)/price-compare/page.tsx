@@ -82,9 +82,9 @@ function MarginHint({
 
   if (!Number.isFinite(supply) || supply <= 0 || costs.length === 0) {
     return (
-      <p className="mt-1 text-[11px] text-gray-400">
-        납품가와 매입단가를 넣으면 마진이 바로 계산됩니다
-      </p>
+      <div className="mt-2 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-3 text-center text-xs text-gray-400">
+        납품가와 매입단가를 넣으면 마진이 바로 나옵니다
+      </div>
     );
   }
 
@@ -92,13 +92,30 @@ function MarginHint({
   const net = supply - cheapest.price / 1.1; // 부가세 뺀 순수익
   const pct = (net / supply) * 100;
   const loss = net <= 0;
+  const thin = !loss && pct < 15;
+
+  const tone = loss
+    ? { box: "border-red-300 bg-red-50", label: "text-red-700", value: "text-red-700" }
+    : thin
+    ? { box: "border-amber-300 bg-amber-50", label: "text-amber-700", value: "text-amber-700" }
+    : { box: "border-green-300 bg-green-50", label: "text-green-700", value: "text-green-700" };
 
   return (
-    <p className={`mt-1 text-[11px] ${loss ? "text-red-600 font-medium" : "text-gray-500"}`}>
-      {cheapest.vendor} {cheapest.price.toLocaleString()}원 기준 · 순수익{" "}
-      <span className="font-semibold">{Math.round(net).toLocaleString()}원</span> ({pct.toFixed(1)}%)
-      {loss && " — 원가보다 낮습니다"}
-    </p>
+    <div className={`mt-2 rounded-lg border-2 px-3 py-2.5 ${tone.box}`}>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className={`text-xs font-semibold ${tone.label}`}>순수익</span>
+        <span className={`text-2xl font-bold tabular-nums ${tone.value}`}>
+          {Math.round(net).toLocaleString()}
+          <span className="ml-0.5 text-base font-semibold">원</span>
+        </span>
+        <span className={`text-xl font-bold tabular-nums ${tone.value}`}>{pct.toFixed(1)}%</span>
+      </div>
+      <p className="mt-1 text-[11px] text-gray-600">
+        최저가 {cheapest.vendor} {cheapest.price.toLocaleString()}원 기준 · 부가세 뺀 금액
+      </p>
+      {loss && <p className="mt-0.5 text-xs font-bold text-red-700">원가보다 낮습니다</p>}
+      {thin && <p className="mt-0.5 text-xs font-medium text-amber-700">마진이 낮습니다</p>}
+    </div>
   );
 }
 
