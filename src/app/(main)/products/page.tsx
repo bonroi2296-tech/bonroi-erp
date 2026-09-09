@@ -5,7 +5,7 @@ import TopBar from "@/components/TopBar";
 import { useToast } from "@/components/Toast";
 import { supabase } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/format";
-import { Search, X, Plus, Trash2, TrendingDown, Truck, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, X, Plus, Trash2, TrendingDown, Truck, History, ChevronLeft, ChevronRight } from "lucide-react";
 
 const PAGE_SIZE = 50;
 
@@ -520,6 +520,8 @@ function PriceTierModal({ product, onClose }: { product: Product; onClose: () =>
 
           <VendorPriceEditor productId={product.id} />
 
+          <PriceHistory productId={product.id} />
+
           {/* 기존 구간 단가 목록 */}
           <div>
             <div className="flex items-center gap-2 mb-3">
@@ -637,6 +639,88 @@ function PriceTierModal({ product, onClose }: { product: Product; onClose: () =>
 }
 
 // ===== 제품 정보(쇼핑몰 베이스) 편집 =====
+// ===== 단가 변경 이력 =====
+// price_history 는 DB 트리거가 자동으로 쌓는다. 보여주는 곳이 없어서 여기 붙였다.
+interface PriceHistoryRow {
+  id: string;
+  price_field: string;
+  old_price: number | null;
+  new_price: number | null;
+  changed_at: string;
+  reason: string | null;
+  vendor: { name: string } | null;
+}
+
+function PriceHistory({ productId }: { productId: string }) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<PriceHistoryRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!open || loaded) return;
+    setLoading(true);
+    supabase
+      .from("price_history")
+      .select("id, price_field, old_price, new_price, changed_at, reason, vendor:vendors(name)")
+      .eq("product_id", productId)
+      .order("changed_at", { ascending: false })
+      .limit(30)
+      .then(({ data }) => {
+        setRows((data as unknown as PriceHistoryRow[]) || []);
+        setLoading(false);
+        setLoaded(true);
+      });
+  }, [open, loaded, productId]);
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 text-sm font-semibold text-gray-900"
+      >
+        <History className="w-4 h-4 text-blue-600" />
+        단가 변경 이력
+        <span className="text-xs font-normal text-gray-400">{open ? "접기" : "펼치기"}</span>
+      </button>
+
+      {open && (
+        <div className="mt-3">
+          {loading ? (
+            <div className="flex justify-center py-6">
+              <div className="animate-spin w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full" />
+            </div>
+          ) : rows.length === 0 ? (
+            <p className="text-xs text-gray-400">바뀐 기록이 없습니다.</p>
+          ) : (
+            <div className="space-y-1">
+              {rows.map((h) => {
+                const up = (h.new_price ?? 0) > (h.old_price ?? 0);
+                return (
+                  <div key={h.id} className="flex items-center gap-2 text-xs py-1 border-b border-gray-50 last:border-0">
+                    <span className="text-gray-400 w-20 shrink-0">{h.changed_at.slice(0, 10)}</span>
+                    <span className="flex-1 truncate text-gray-600">
+                      {h.price_field === "supply_price" ? "납품가" : h.vendor?.name ?? "매입가"}
+                    </span>
+                    <span className="text-gray-400 tabular-nums">
+                      {h.old_price == null ? "—" : formatCurrency(h.old_price)}
+                    </span>
+                    <span className="text-gray-300">→</span>
+                    <span className={`font-medium tabular-nums ${up ? "text-red-600" : "text-blue-600"}`}>
+                      {h.new_price == null ? "—" : formatCurrency(h.new_price)}
+                    </span>
+                  </div>
+                );
+              })}
+              <p className="pt-1 text-[11px] text-gray-400">최근 30건. 오르면 빨강, 내리면 파랑입니다.</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ===== 거래처별 매입단가 =====
 // 최저가 표시가 자동으로 안 맞춰져서 값이 틀어져 있었다. 저장할 때마다 다시 계산한다.
 interface VendorPriceRow {
