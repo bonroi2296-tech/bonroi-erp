@@ -59,8 +59,6 @@ export default function ProductsPage() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [showAdd, setShowAdd] = useState(false);
 
   // 검색어 디바운스
   useEffect(() => {
@@ -103,7 +101,7 @@ export default function ProductsPage() {
     return () => {
       cancelled = true;
     };
-  }, [page, categoryFilter, debouncedSearch, refreshKey]);
+  }, [page, categoryFilter, debouncedSearch]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
@@ -134,12 +132,6 @@ export default function ProductsPage() {
               </button>
             ))}
           </div>
-          <button
-            onClick={() => setShowAdd(true)}
-            className="sm:ml-auto flex items-center gap-1.5 px-3 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800"
-          >
-            <Plus className="w-4 h-4" /> 제품 추가
-          </button>
         </div>
 
         {loading ? (
@@ -231,203 +223,7 @@ export default function ProductsPage() {
           onClose={() => setSelectedProduct(null)}
         />
       )}
-
-      {showAdd && (
-        <AddProductModal
-          onClose={() => setShowAdd(false)}
-          onSaved={() => {
-            setShowAdd(false);
-            setRefreshKey((k) => k + 1);
-          }}
-        />
-      )}
     </>
-  );
-}
-
-// ===== 제품 등록 모달 =====
-// 거래처별 매입단가를 같이 넣어야 확보 관리에서 단가가 자동으로 잡힌다.
-function AddProductModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const toast = useToast();
-  const [vendors, setVendors] = useState<{ id: string; name: string }[]>([]);
-  const [name, setName] = useState("");
-  const [spec, setSpec] = useState("");
-  const [category, setCategory] = useState("양방");
-  const [supplyPrice, setSupplyPrice] = useState("");
-  const [ediCode, setEdiCode] = useState("");
-  const [vendorId, setVendorId] = useState("");
-  const [unitPrice, setUnitPrice] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    supabase
-      .from("vendors")
-      .select("id, name")
-      .order("name")
-      .then(({ data }) => setVendors(data || []));
-  }, []);
-
-  async function save() {
-    const trimmed = name.trim();
-    if (!trimmed) return toast.error("품목명을 입력하세요.");
-    if (vendorId && !Number(unitPrice)) return toast.error("거래처를 골랐으면 매입단가도 넣어주세요.");
-    setSaving(true);
-
-    const specValue = spec.trim() || null;
-    const dupQuery = supabase.from("products").select("id").eq("name", trimmed).limit(1);
-    const { data: dup } = await (specValue === null ? dupQuery.is("spec", null) : dupQuery.eq("spec", specValue));
-    if (dup && dup.length) {
-      setSaving(false);
-      return toast.error(`"${trimmed}${specValue ? ` ${specValue}` : ""}" 은 이미 등록돼 있어요. 검색해서 확인해보세요.`);
-    }
-
-    const { data, error } = await supabase
-      .from("products")
-      .insert({
-        name: trimmed,
-        spec: specValue,
-        category,
-        supply_price: Number(supplyPrice) || null,
-        edi_code: ediCode.trim() || null,
-      })
-      .select("id")
-      .single();
-
-    if (error || !data) {
-      setSaving(false);
-      // 23505 = products_name_spec_key (품목명+규격 조합이 이미 있음)
-      if (error?.code === "23505") {
-        return toast.error(`"${trimmed}${spec.trim() ? ` ${spec.trim()}` : ""}" 은 이미 등록돼 있어요. 검색해서 확인해보세요.`);
-      }
-      return toast.error(error?.message ?? "제품 등록에 실패했어요.");
-    }
-
-    if (vendorId) {
-      const { error: vpError } = await supabase.from("vendor_products").insert({
-        product_id: data.id,
-        vendor_id: vendorId,
-        unit_price: Number(unitPrice),
-        is_lowest: true, // 첫 거래처라 최저가
-        last_updated: new Date().toISOString(),
-      });
-      if (vpError) {
-        setSaving(false);
-        return toast.error("제품은 등록했는데 매입단가 저장에 실패했어요: " + vpError.message);
-      }
-    }
-
-    setSaving(false);
-    toast.success(`${trimmed} 등록했어요.`);
-    onSaved();
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl w-full max-w-md">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-          <h2 className="font-bold text-gray-900">제품 추가</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-900">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="p-5 space-y-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">품목명</label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="예: 신창 수액세트 (무침)"
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">규격</label>
-            <input
-              value={spec}
-              onChange={(e) => setSpec(e.target.value)}
-              placeholder="예: 50ea"
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-            <p className="mt-1 text-[11px] text-gray-400">거래명세서 규격 칸에 이 값이 들어갑니다</p>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">구분</label>
-            <div className="flex gap-2">
-              {["양방", "한방"].map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setCategory(c)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
-                    category === c ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200"
-                  }`}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">납품가 (병원가)</label>
-              <input
-                value={supplyPrice}
-                onChange={(e) => setSupplyPrice(e.target.value)}
-                type="number"
-                min={0}
-                placeholder="나중에 넣어도 됨"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">EDI 코드</label>
-              <input
-                value={ediCode}
-                onChange={(e) => setEdiCode(e.target.value)}
-                placeholder="선택"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="pt-3 border-t border-gray-100">
-            <p className="text-xs font-medium text-gray-600 mb-2">어디서 얼마에 사나요? <span className="font-normal text-gray-400">(선택)</span></p>
-            <div className="grid grid-cols-2 gap-3">
-              <select
-                value={vendorId}
-                onChange={(e) => setVendorId(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              >
-                <option value="">거래처 선택</option>
-                {vendors.map((v) => (
-                  <option key={v.id} value={v.id}>{v.name}</option>
-                ))}
-              </select>
-              <input
-                value={unitPrice}
-                onChange={(e) => setUnitPrice(e.target.value)}
-                type="number"
-                min={0}
-                placeholder="매입단가"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-            </div>
-            <p className="mt-1 text-[11px] text-gray-400">넣어두면 확보 관리에서 단가가 자동으로 잡힙니다</p>
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900">
-            취소
-          </button>
-          <button
-            onClick={save}
-            disabled={saving}
-            className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
-          >
-            {saving ? "저장 중..." : "등록"}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -650,7 +446,6 @@ function PriceTierModal({ product, onClose }: { product: Product; onClose: () =>
   );
 }
 
-// ===== 제품 정보(쇼핑몰 베이스) 편집 =====
 // ===== 단가 변경 이력 =====
 // price_history 는 DB 트리거가 자동으로 쌓는다. 보여주는 곳이 없어서 여기 붙였다.
 interface PriceHistoryRow {
@@ -940,6 +735,7 @@ function VendorPriceEditor({ productId }: { productId: string }) {
   );
 }
 
+// ===== 제품 정보(쇼핑몰 베이스) 편집 =====
 function ProductInfoEditor({ product }: { product: Product }) {
   const toast = useToast();
   const [imageUrl, setImageUrl] = useState(product.image_url ?? "");

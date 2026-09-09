@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import TopBar from "@/components/TopBar";
+import { useToast } from "@/components/Toast";
 import { supabase } from "@/lib/supabase";
 import { Search, ArrowUpDown, TrendingDown, AlertTriangle, X, Plus, Pencil, Trash2, Save } from "lucide-react";
 
@@ -61,7 +62,48 @@ interface ProductFormData {
 const YANGBANG_VENDORS = ["SD바이오", "주사기닷컴", "디에이치몰", "메디오션", "한백상사"];
 const HANBANG_VENDORS = ["수진메디칼", "안진도매로", "한의나라", "허브원", "케이엠몰"];
 
+// 납품가를 넣을 때 마진이 얼마인지 바로 보여준다. 매번 엑셀로 확인하지 않게.
+// 매입가는 부가세 포함, 납품가는 부가세 별도라 순수익 = 납품가 - 매입가/1.1 이다.
+function MarginHint({
+  supplyPriceRaw,
+  vendorPrices,
+}: {
+  supplyPriceRaw: string;
+  vendorPrices: Record<string, string>;
+}) {
+  const supply = parseInt((supplyPriceRaw || "").replace(/[,₩\s]/g, ""), 10);
+
+  const costs = Object.entries(vendorPrices)
+    .map(([vendor, raw]) => {
+      const { unknown, price } = parseVendorPriceInput(raw);
+      return unknown || price === null ? null : { vendor, price };
+    })
+    .filter((x): x is { vendor: string; price: number } => x !== null);
+
+  if (!Number.isFinite(supply) || supply <= 0 || costs.length === 0) {
+    return (
+      <p className="mt-1 text-[11px] text-gray-400">
+        납품가와 매입단가를 넣으면 마진이 바로 계산됩니다
+      </p>
+    );
+  }
+
+  const cheapest = costs.reduce((a, b) => (b.price < a.price ? b : a));
+  const net = supply - cheapest.price / 1.1; // 부가세 뺀 순수익
+  const pct = (net / supply) * 100;
+  const loss = net <= 0;
+
+  return (
+    <p className={`mt-1 text-[11px] ${loss ? "text-red-600 font-medium" : "text-gray-500"}`}>
+      {cheapest.vendor} {cheapest.price.toLocaleString()}원 기준 · 순수익{" "}
+      <span className="font-semibold">{Math.round(net).toLocaleString()}원</span> ({pct.toFixed(1)}%)
+      {loss && " — 원가보다 낮습니다"}
+    </p>
+  );
+}
+
 export default function PriceComparePage() {
+  const toast = useToast();
   const [products, setProducts] = useState<ProductWithPrices[]>([]);
   const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState<"양방" | "한방">("양방");
@@ -143,7 +185,16 @@ export default function PriceComparePage() {
         .select("id, name, spec, category, supply_price")
         .single();
 
-      if (error || !newProduct) { setSaving(false); return; }
+      if (error || !newProduct) {
+        setSaving(false);
+        // 23505 = (품목명, 규격) 유니크 제약
+        toast.error(
+          error?.code === "23505"
+            ? `"${[formData.name.trim(), formData.spec.trim()].filter(Boolean).join(" ")}" 은 이미 등록돼 있어요.`
+            : `등록하지 못했어요: ${error?.message ?? "알 수 없는 오류"}`
+        );
+        return;
+      }
 
       // 벤더 단가 입력
       for (const vendorName of vendorList) {
@@ -229,8 +280,9 @@ export default function PriceComparePage() {
     }
 
     setSaving(false);
+    toast.success(modalMode === "create" ? `${formData.name.trim()} 등록했어요.` : "저장했어요.");
     closeModal();
-  }, [formData, modalMode, editingProduct, category, vendorIdMap, closeModal]);
+  }, [formData, modalMode, editingProduct, category, vendorIdMap, closeModal, toast]);
 
   // 삭제 확인
   const handleDeleteConfirm = useCallback(async () => {
@@ -245,9 +297,10 @@ export default function PriceComparePage() {
     setProducts((prev) => prev.filter((p) => p.id !== deleteTarget.id));
     setSaving(false);
     setDeleteConfirmOpen(false);
+    toast.success(`${deleteTarget.name} 지웠어요.`);
     setDeleteTarget(null);
     closeModal();
-  }, [deleteTarget, closeModal]);
+  }, [deleteTarget, closeModal, toast]);
 
   useEffect(() => {
     async function fetchData() {
@@ -1060,6 +1113,10 @@ export default function PriceComparePage() {
                     onChange={(e) => setFormData({ ...formData, supply_price: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="병원에 납품하는 가격"
+                  />
+                  <MarginHint
+                    supplyPriceRaw={formData.supply_price}
+                    vendorPrices={formData.vendorPrices}
                   />
                 </div>
               </div>
