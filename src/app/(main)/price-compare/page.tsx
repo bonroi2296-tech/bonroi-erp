@@ -63,7 +63,8 @@ const YANGBANG_VENDORS = ["SD바이오", "주사기닷컴", "디에이치몰", "
 const HANBANG_VENDORS = ["수진메디칼", "안진도매로", "한의나라", "허브원", "케이엠몰"];
 
 // 납품가를 넣을 때 마진이 얼마인지 바로 보여준다. 매번 엑셀로 확인하지 않게.
-// 매입가는 부가세 포함, 납품가는 부가세 별도라 순수익 = 납품가 - 매입가/1.1 이다.
+// 매입가는 부가세 포함, 납품가는 부가세 별도다. 실제로 주고받는 금액끼리 빼도록
+// 청구액(납품가*1.1) - 매입가 로 잡는다. 장부의 '마진'과 같은 기준.
 function MarginHint({
   supplyPriceRaw,
   vendorPrices,
@@ -83,7 +84,7 @@ function MarginHint({
   if (!Number.isFinite(supply) || supply <= 0 || costs.length === 0) {
     return (
       <div>
-        <label className="block text-xs text-gray-500 mb-1">순수익 (부가세 제외)</label>
+        <label className="block text-xs text-gray-500 mb-1">마진 (부가세 포함)</label>
         <div className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-400">
           납품가와 매입단가를 넣으면 계산됩니다
         </div>
@@ -92,25 +93,26 @@ function MarginHint({
   }
 
   const cheapest = costs.reduce((a, b) => (b.price < a.price ? b : a));
-  const net = supply - cheapest.price / 1.1; // 부가세 뺀 순수익
-  const pct = (net / supply) * 100;
-  const loss = net <= 0;
+  const billed = Math.round(supply * 1.1); // 병원에 청구하는 금액
+  const margin = billed - cheapest.price;
+  const pct = (margin / billed) * 100;
+  const loss = margin <= 0;
   const thin = !loss && pct < 15;
 
   const valueTone = loss ? "text-red-600" : thin ? "text-amber-600" : "text-gray-900";
 
   return (
     <div>
-      <label className="block text-xs text-gray-500 mb-1">순수익 (부가세 제외)</label>
+      <label className="block text-xs text-gray-500 mb-1">마진 (부가세 포함)</label>
       <div className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 flex items-center gap-2">
         <span className={`font-semibold tabular-nums ${valueTone}`}>
-          {Math.round(net).toLocaleString()}원
+          {margin.toLocaleString()}원
         </span>
         <span className={`tabular-nums ${valueTone}`}>{pct.toFixed(1)}%</span>
         {loss && <span className="text-xs font-medium text-red-600">원가 이하</span>}
         {thin && <span className="text-xs font-medium text-amber-600">마진 낮음</span>}
         <span className="ml-auto text-xs text-gray-400 truncate">
-          {cheapest.vendor} {cheapest.price.toLocaleString()}원 기준
+          청구 {billed.toLocaleString()} − {cheapest.vendor} {cheapest.price.toLocaleString()}
         </span>
       </div>
     </div>
