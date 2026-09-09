@@ -82,8 +82,11 @@ function MarginHint({
 
   if (!Number.isFinite(supply) || supply <= 0 || costs.length === 0) {
     return (
-      <div className="mt-2 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-3 text-center text-xs text-gray-400">
-        납품가와 매입단가를 넣으면 마진이 바로 나옵니다
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">순수익 (부가세 제외)</label>
+        <div className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-400">
+          납품가와 매입단가를 넣으면 계산됩니다
+        </div>
       </div>
     );
   }
@@ -94,26 +97,22 @@ function MarginHint({
   const loss = net <= 0;
   const thin = !loss && pct < 15;
 
-  const tone = loss
-    ? { box: "border-red-300 bg-red-50", label: "text-red-700", value: "text-red-700" }
-    : thin
-    ? { box: "border-amber-300 bg-amber-50", label: "text-amber-700", value: "text-amber-700" }
-    : { box: "border-green-300 bg-green-50", label: "text-green-700", value: "text-green-700" };
+  const valueTone = loss ? "text-red-600" : thin ? "text-amber-600" : "text-gray-900";
 
   return (
-    <div className={`mt-2 rounded-lg border px-3 py-2 ${tone.box}`}>
-      <div className="flex items-baseline gap-2">
-        <span className={`text-xs font-medium ${tone.label}`}>순수익</span>
-        <span className={`text-base font-bold tabular-nums ${tone.value}`}>
+    <div>
+      <label className="block text-xs text-gray-500 mb-1">순수익 (부가세 제외)</label>
+      <div className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 flex items-center gap-2">
+        <span className={`font-semibold tabular-nums ${valueTone}`}>
           {Math.round(net).toLocaleString()}원
         </span>
-        <span className={`text-sm font-semibold tabular-nums ${tone.value}`}>{pct.toFixed(1)}%</span>
-        {loss && <span className="ml-auto text-xs font-semibold text-red-700">원가 이하</span>}
-        {thin && <span className="ml-auto text-xs font-medium text-amber-700">마진 낮음</span>}
+        <span className={`tabular-nums ${valueTone}`}>{pct.toFixed(1)}%</span>
+        {loss && <span className="text-xs font-medium text-red-600">원가 이하</span>}
+        {thin && <span className="text-xs font-medium text-amber-600">마진 낮음</span>}
+        <span className="ml-auto text-xs text-gray-400 truncate">
+          {cheapest.vendor} {cheapest.price.toLocaleString()}원 기준
+        </span>
       </div>
-      <p className="mt-0.5 text-[11px] text-gray-500">
-        {cheapest.vendor} {cheapest.price.toLocaleString()}원 기준 · 부가세 뺀 금액
-      </p>
     </div>
   );
 }
@@ -1130,11 +1129,11 @@ export default function PriceComparePage() {
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="병원에 납품하는 가격"
                   />
-                  <MarginHint
-                    supplyPriceRaw={formData.supply_price}
-                    vendorPrices={formData.vendorPrices}
-                  />
                 </div>
+                <MarginHint
+                  supplyPriceRaw={formData.supply_price}
+                  vendorPrices={formData.vendorPrices}
+                />
               </div>
 
               {/* 벤더별 단가 */}
