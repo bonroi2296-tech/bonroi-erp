@@ -273,11 +273,19 @@ function AddProductModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
     if (vendorId && !Number(unitPrice)) return toast.error("거래처를 골랐으면 매입단가도 넣어주세요.");
     setSaving(true);
 
+    const specValue = spec.trim() || null;
+    const dupQuery = supabase.from("products").select("id").eq("name", trimmed).limit(1);
+    const { data: dup } = await (specValue === null ? dupQuery.is("spec", null) : dupQuery.eq("spec", specValue));
+    if (dup && dup.length) {
+      setSaving(false);
+      return toast.error(`"${trimmed}${specValue ? ` ${specValue}` : ""}" 은 이미 등록돼 있어요. 검색해서 확인해보세요.`);
+    }
+
     const { data, error } = await supabase
       .from("products")
       .insert({
         name: trimmed,
-        spec: spec.trim() || null,
+        spec: specValue,
         category,
         supply_price: Number(supplyPrice) || null,
         edi_code: ediCode.trim() || null,
@@ -287,6 +295,10 @@ function AddProductModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
 
     if (error || !data) {
       setSaving(false);
+      // 23505 = products_name_spec_key (품목명+규격 조합이 이미 있음)
+      if (error?.code === "23505") {
+        return toast.error(`"${trimmed}${spec.trim() ? ` ${spec.trim()}` : ""}" 은 이미 등록돼 있어요. 검색해서 확인해보세요.`);
+      }
       return toast.error(error?.message ?? "제품 등록에 실패했어요.");
     }
 
