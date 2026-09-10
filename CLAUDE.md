@@ -10,7 +10,7 @@
 ## 2. 스택
 - **Next.js 14.2.35 (App Router)** · React 18 · TypeScript 5
 - **Supabase** (`@supabase/supabase-js` 2.101, `@supabase/ssr` 0.10) — DB/인증
-- **Vercel** 배포 (main 푸시 = 자동 배포)
+- **Vercel** 배포 (즉시 아님 — 하루 1회 자동 배포. §3 참고)
 - **Tailwind CSS 3.4** · 아이콘 `lucide-react`
 - **Google Gemini** (`@google/genai`) — 주문/출고확인서 AI 파싱
 - **ExcelJS** — 거래명세서 엑셀 생성
@@ -99,9 +99,9 @@ supabase/migrations/   # 0001~ 마이그레이션 SQL
    - 라이브 DB에 적용(Supabase MCP `apply_migration`)
    - **anon 권한 확인** (새 테이블/시퀀스/함수면 grant + 정책)
    - **타입 재생성**: Supabase MCP `generate_typescript_types` → `src/lib/database.types.ts` 덮어쓰기
-5. **동작 확인**: 가능하면 화면에서 직접 눌러본다. 못 하면 "UI 테스트 못 함"을 명시.
+5. **동작 확인**: **§10대로 실제로 띄워서 확인한다.** 정말 못 했을 때만 "UI 테스트 못 함"을 명시.
 6. **비로그인(anon)에서 되는지** 확인.
-7. 커밋 → 지정 브랜치 푸시 → **PR(드래프트) 생성**. main 머지 = 배포.
+7. 커밋 → 지정 브랜치 푸시 → **PR(드래프트) 생성**. main 머지 후 실제 반영은 §3의 하루 1회 배포 시점.
 
 ## 10. 화면 확인(UI 테스트) — "못 함"으로 넘기지 마라
 
