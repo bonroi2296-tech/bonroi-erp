@@ -2,6 +2,7 @@
 
 > 이 파일은 다음 세션의 Claude가 그대로 이어받기 위한 핵심 지침이다.
 > 배경·결정·할 일의 자세한 내용은 `docs/PROJECT_CONTEXT.md` 를 함께 읽어라.
+> 담당자(비개발자)가 너를 부리는 방법은 `docs/AI_USAGE_GUIDE.md` 에 있다. 설명 수준·확인 절차는 그 문서 기준에 맞춰라.
 
 ## 1. 한 줄 개요
 의료소모품 유통사용 내부 ERP. 병원(지점)에서 주문을 받아 → 여러 거래처에 나눠 발주하고 → 실제 출고·매입을 장부(주문 내역)에 쌓는다.
@@ -23,7 +24,11 @@ npm run lint           # ESLint (next lint)
 npx tsc --noEmit       # 타입체크
 ```
 - **Turbopack 금지**: Next 14는 빌드가 원래 webpack이라 위험 없음. `next build`에 `--webpack`/`--turbopack` 플래그를 붙이지 마라(14엔 그 빌드 플래그가 없어 에러난다). 그냥 `npm run build`.
-- **배포**: `main` 브랜치 푸시 → Vercel 자동 배포. 개발은 지정된 feature 브랜치에서 → PR(드래프트) → main 머지.
+- **배포**: main에 푸시해도 바로 안 나간다. `vercel.json`의 ignoreCommand 때문에 **커밋 메시지에 `[deploy]`가 있는 커밋만 빌드**된다.
+  실제 반영은 GitHub Actions `daily-deploy.yml`이 **매일 15:00 KST(06:00 UTC)** 빈 `[deploy]` 커밋을 main에 푸시할 때. 즉시 배포는 그 워크플로 수동 실행(workflow_dispatch).
+  개발은 지정된 feature 브랜치에서 → PR(드래프트) → main 머지.
+- ⚠️ **커밋 메시지에 그 배포 마커를 그대로 쓰지 마라.** ignoreCommand가 마지막 커밋 메시지를 그대로 grep하므로,
+  설명하려고 본문에 적기만 해도 그 커밋이 즉시 배포된다(실제로 한 번 걸림). 문서·커밋에서 언급할 땐 `대괄호 deploy`처럼 우회 표기.
 
 ## 4. 환경변수
 | 변수 | 용도 | 비고 |
