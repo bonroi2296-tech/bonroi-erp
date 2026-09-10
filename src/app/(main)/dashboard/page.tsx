@@ -268,12 +268,12 @@ export default function DashboardPage() {
             </a>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-xs md:text-sm min-w-[500px]">
+            <table className="w-full text-xs md:text-sm md:min-w-[500px]">
               <thead>
                 <tr className="bg-gray-50 text-gray-500">
                   <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">주문번호</th>
                   <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">지점</th>
-                  <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">주문일</th>
+                  <th className="hidden md:table-cell text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">주문일</th>
                   <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">상태</th>
                   <th className="text-right px-4 md:px-5 py-2.5 md:py-3 font-medium">공급가액</th>
                 </tr>
@@ -283,7 +283,7 @@ export default function DashboardPage() {
                   <tr key={order.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 md:px-5 py-2.5 md:py-3 font-medium text-gray-900">{order.order_number}</td>
                     <td className="px-4 md:px-5 py-2.5 md:py-3 text-gray-600">{(order.branch as unknown as { name: string })?.name || "-"}</td>
-                    <td className="px-4 md:px-5 py-2.5 md:py-3 text-gray-600">{order.order_date}</td>
+                    <td className="hidden md:table-cell px-4 md:px-5 py-2.5 md:py-3 text-gray-600">{order.order_date}</td>
                     <td className="px-4 md:px-5 py-2.5 md:py-3">
                       <span className={`px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-xs font-medium ${statusColors[order.status] || "bg-gray-100 text-gray-600"}`}>
                         {order.status}

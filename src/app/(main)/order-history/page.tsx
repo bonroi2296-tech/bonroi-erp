@@ -493,9 +493,9 @@ export default function OrderHistoryPage() {
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase">
                       <th className="text-left px-3 py-2 whitespace-nowrap">거래처</th>
-                      <th className="text-right px-2 py-2 whitespace-nowrap">건수</th>
+                      <th className="hidden md:table-cell text-right px-2 py-2 whitespace-nowrap">건수</th>
                       <th className="text-right px-2 py-2 whitespace-nowrap">총매입가</th>
-                      <th className="text-right px-2 py-2 whitespace-nowrap">공급가액</th>
+                      <th className="hidden md:table-cell text-right px-2 py-2 whitespace-nowrap">공급가액</th>
                       <th className="text-right px-2 py-2 whitespace-nowrap">마진</th>
                       <th className="text-right px-3 py-2 whitespace-nowrap">마진율</th>
                     </tr>
@@ -508,9 +508,9 @@ export default function OrderHistoryPage() {
                             {v.vendor}
                           </span>
                         </td>
-                        <td className="px-2 py-2 text-right text-gray-600 text-sm">{v.count.toLocaleString()}</td>
+                        <td className="hidden md:table-cell px-2 py-2 text-right text-gray-600 text-sm">{v.count.toLocaleString()}</td>
                         <td className="px-2 py-2 text-right text-gray-700 text-sm">{formatPrice(v.purchase)}</td>
-                        <td className="px-2 py-2 text-right text-gray-700 text-sm">{formatPrice(v.supply)}</td>
+                        <td className="hidden md:table-cell px-2 py-2 text-right text-gray-700 text-sm">{formatPrice(v.supply)}</td>
                         <td className={`px-2 py-2 text-right font-semibold text-sm ${v.margin > 0 ? "text-emerald-600" : v.margin < 0 ? "text-red-600" : "text-gray-400"}`}>
                           {formatPrice(v.margin)}
                         </td>
@@ -533,7 +533,64 @@ export default function OrderHistoryPage() {
           ) : filteredRows.length === 0 ? (
             <div className="p-12 text-center text-gray-400">조건에 맞는 주문 내역이 없습니다.</div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            {/* 폰: 14열 표는 옆으로 못 본다. 줄마다 카드 하나로 편다(값은 하나도 빼지 않는다) */}
+            <div className="md:hidden divide-y divide-gray-100">
+              {filteredRows.map((r) => (
+                <div key={r.id} className="px-3 py-3">
+                  <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                    <span className="text-gray-500">{formatDate(r.order_date)}</span>
+                    <span className={`inline-block px-2 py-0.5 rounded font-medium ${branchColor(r.branch_short)}`}>
+                      {r.branch_short}
+                    </span>
+                    {r.vendor_name && (
+                      <span className={`inline-block px-2 py-0.5 rounded font-medium ${vendorColor(r.vendor_name)}`}>
+                        {r.vendor_name}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-sm font-medium text-gray-900 break-words">{r.raw_product_name}</div>
+                  <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                    <div className="flex justify-between"><span className="text-gray-400">수량</span><span className="text-gray-700">{r.quantity}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">매입가</span><span className="text-gray-700">{formatPrice(r.purchase_price)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">총매입가</span><span className="text-gray-700">{formatPrice(r.total_purchase)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">납품가</span><span className="text-gray-700">{formatPrice(r.supply_price)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">공급가액</span><span className="text-gray-700">{formatPrice(r.total_supply)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">부가세</span><span className="text-gray-700">{formatPrice(r.supply_vat)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-400">청구액</span><span className="font-semibold text-blue-700">{formatPrice(r.billed_amount)}</span></div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">마진</span>
+                      <span className={`font-semibold ${r.margin > 0 ? "text-emerald-600" : r.margin < 0 ? "text-red-600" : "text-gray-400"}`}>
+                        {formatPrice(r.margin)} <span className="font-normal text-gray-400">{marginRate(r)}</span>
+                      </span>
+                    </div>
+                  </div>
+                  {r.edi_code && <div className="mt-1 text-[11px] text-gray-400">EDI {r.edi_code}</div>}
+                  {editingNote === r.id ? (
+                    <input
+                      autoFocus
+                      value={noteDraft}
+                      onChange={(e) => setNoteDraft(e.target.value)}
+                      onBlur={() => saveNote(r.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveNote(r.id);
+                        if (e.key === "Escape") setEditingNote(null);
+                      }}
+                      placeholder="예: 144개 = 3카톤 (48개 기준)"
+                      className="mt-2 w-full px-2.5 py-1.5 border border-blue-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  ) : (
+                    <button
+                      onClick={() => { setEditingNote(r.id); setNoteDraft(r.note); }}
+                      className="mt-2 text-left text-xs text-amber-900"
+                    >
+                      {r.note ? <><span className="text-amber-500 mr-1">↳</span>{r.note}</> : <span className="text-gray-400">+ 메모</span>}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase">
@@ -668,6 +725,7 @@ export default function OrderHistoryPage() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </div>
       </div>

@@ -299,31 +299,31 @@ function FulfillmentTab() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 text-gray-500 border-b border-gray-100 text-xs">
-                  <th className="text-left px-4 py-3 font-medium">주문일</th>
-                  <th className="text-left px-3 py-3 font-medium">지점</th>
-                  <th className="text-left px-3 py-3 font-medium">거래처</th>
-                  <th className="text-center px-3 py-3 font-medium">품목수</th>
-                  <th className="text-right px-3 py-3 font-medium">매입액</th>
-                  <th className="text-center px-3 py-3 font-medium">상태</th>
-                  <th className="text-center px-3 py-3 font-medium">상태 변경</th>
-                  <th className="px-3 py-3"></th>
+                  <th className="text-left px-2 md:px-4 py-3 font-medium">주문일</th>
+                  <th className="text-left px-1.5 md:px-3 py-3 font-medium">지점</th>
+                  <th className="text-left px-1.5 md:px-3 py-3 font-medium">거래처</th>
+                  <th className="hidden md:table-cell text-center px-1.5 md:px-3 py-3 font-medium">품목수</th>
+                  <th className="hidden md:table-cell text-right px-1.5 md:px-3 py-3 font-medium">매입액</th>
+                  <th className="hidden md:table-cell text-center px-1.5 md:px-3 py-3 font-medium">상태</th>
+                  <th className="text-center px-1.5 md:px-3 py-3 font-medium">상태 변경</th>
+                  <th className="px-1.5 md:px-3 py-3"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {filtered.map((o) => (
                   <tr key={o.id} className="hover:bg-blue-50/30 transition-colors">
-                    <td className="px-4 py-2.5 text-gray-900 font-medium whitespace-nowrap">{formatDate(o.order_date)}</td>
-                    <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{o.branch?.short_name || "-"}</td>
-                    <td className="px-3 py-2.5 text-gray-700 whitespace-nowrap">{o.vendor_name}</td>
-                    <td className="px-3 py-2.5 text-center text-gray-500">{o.item_count}</td>
-                    <td className="px-3 py-2.5 text-right text-gray-700 whitespace-nowrap">₩{o.total_purchase_amount?.toLocaleString()}</td>
-                    <td className="px-3 py-2.5 text-center">
+                    <td className="px-2 md:px-4 py-2.5 text-gray-900 font-medium whitespace-nowrap">{formatDate(o.order_date)}</td>
+                    <td className="px-1.5 md:px-3 py-2.5 text-gray-600 whitespace-nowrap">{o.branch?.short_name || "-"}</td>
+                    <td className="px-1.5 md:px-3 py-2.5 text-gray-700 whitespace-nowrap">{o.vendor_name}</td>
+                    <td className="hidden md:table-cell px-1.5 md:px-3 py-2.5 text-center text-gray-500">{o.item_count}</td>
+                    <td className="hidden md:table-cell px-1.5 md:px-3 py-2.5 text-right text-gray-700 whitespace-nowrap">₩{o.total_purchase_amount?.toLocaleString()}</td>
+                    <td className="hidden md:table-cell px-1.5 md:px-3 py-2.5 text-center">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[o.status] || "bg-gray-100 text-gray-600"}`}>
                         {STATUS_ICONS[o.status]}
                         {o.status}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5 text-center">
+                    <td className="px-1.5 md:px-3 py-2.5 text-center">
                       <select
                         value={o.status}
                         onChange={(e) => updateOrderStatus(o.id, e.target.value)}
@@ -335,7 +335,7 @@ function FulfillmentTab() {
                         ))}
                       </select>
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-1.5 md:px-3 py-2.5">
                       <button onClick={() => openDetail(o)} className="p-1 hover:bg-gray-100 rounded transition-colors">
                         <ChevronRight className="w-4 h-4 text-gray-400" />
                       </button>

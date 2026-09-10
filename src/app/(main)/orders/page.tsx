@@ -569,15 +569,15 @@ export default function OrdersPage() {
                     {isExpanded && (
                       <div className="bg-gray-50 border-t border-gray-100">
                         <div className="overflow-x-auto">
-                          <table className="w-full text-xs md:text-sm min-w-[600px]">
+                          <table className="w-full text-xs md:text-sm md:min-w-[600px]">
                             <thead>
                               <tr className="text-gray-400 text-[11px]">
                                 <th className="text-left px-4 md:px-5 pl-12 py-2 font-medium">주문번호</th>
-                                <th className="text-left px-3 py-2 font-medium">구분</th>
+                                <th className="hidden md:table-cell text-left px-3 py-2 font-medium">구분</th>
                                 <th className="text-left px-3 py-2 font-medium">벤더</th>
                                 <th className="text-left px-3 py-2 font-medium">상태</th>
-                                <th className="text-right px-3 py-2 font-medium">매입가</th>
-                                <th className="text-right px-3 py-2 font-medium">공급가</th>
+                                <th className="hidden md:table-cell text-right px-3 py-2 font-medium">매입가</th>
+                                <th className="hidden md:table-cell text-right px-3 py-2 font-medium">공급가</th>
                                 <th className="text-right px-4 md:px-5 py-2 font-medium">마진</th>
                               </tr>
                             </thead>
@@ -595,7 +595,7 @@ export default function OrdersPage() {
                                       <td className="px-4 md:px-5 pl-12 py-2 font-medium text-blue-600">
                                         {vo.order_number}
                                       </td>
-                                      <td className="px-3 py-2 text-gray-500">{vo.category}</td>
+                                      <td className="hidden md:table-cell px-3 py-2 text-gray-500">{vo.category}</td>
                                       <td className="px-3 py-2">
                                         {vo.vendor_name ? (
                                           <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${vendorColor(vo.vendor_name)}`}>
@@ -624,10 +624,10 @@ export default function OrdersPage() {
                                           ))}
                                         </select>
                                       </td>
-                                      <td className="px-3 py-2 text-right text-gray-600">
+                                      <td className="hidden md:table-cell px-3 py-2 text-right text-gray-600">
                                         {formatCurrency(vo.total_purchase_amount)}
                                       </td>
-                                      <td className="px-3 py-2 text-right text-gray-900">
+                                      <td className="hidden md:table-cell px-3 py-2 text-right text-gray-900">
                                         {formatCurrency(vo.total_supply_amount)}
                                       </td>
                                       <td className="px-4 md:px-5 py-2 text-right font-medium text-emerald-600">

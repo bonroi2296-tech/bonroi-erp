@@ -1088,8 +1088,8 @@ export default function SourcingDetailPage() {
                 <th className="w-6"></th>
                 <th className="text-left px-3 py-2">주문 제품(병원)</th>
                 <th className="text-right px-2 py-2 whitespace-nowrap">주문 수량</th>
-                <th className="text-left px-3 py-2">출고 제품(실제)</th>
-                <th className="text-right px-2 py-2 whitespace-nowrap">출고 수량</th>
+                <th className="hidden md:table-cell text-left px-3 py-2">출고 제품(실제)</th>
+                <th className="hidden md:table-cell text-right px-2 py-2 whitespace-nowrap">출고 수량</th>
                 <th className="text-left px-2 py-2 whitespace-nowrap">거래처</th>
                 <th className="text-left px-2 py-2">사유</th>
                 <th className="w-10"></th>
@@ -1134,10 +1134,10 @@ export default function SourcingDetailPage() {
                       <td className="px-2 py-1.5 text-right text-xs whitespace-nowrap">
                         {d.required_qty}{d.unit_label ? ` ${d.unit_label}` : ""}
                       </td>
-                      <td className="px-3 py-1.5 text-xs text-gray-700">
+                      <td className="hidden md:table-cell px-3 py-1.5 text-xs text-gray-700">
                         {showShipped ? productLabel : <span className="text-gray-400">—</span>}
                       </td>
-                      <td className="px-2 py-1.5 text-right text-xs whitespace-nowrap">
+                      <td className="hidden md:table-cell px-2 py-1.5 text-right text-xs whitespace-nowrap">
                         {showShipped ? secured : <span className="text-gray-400">—</span>}
                       </td>
                       <td className="px-2 py-1.5 text-xs whitespace-nowrap">
