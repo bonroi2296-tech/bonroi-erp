@@ -59,8 +59,12 @@ interface ProductFormData {
   vendorPrices: Record<string, string>;
 }
 
-const YANGBANG_VENDORS = ["SD바이오", "주사기닷컴", "디에이치몰", "메디오션", "한백상사"];
-const HANBANG_VENDORS = ["수진메디칼", "안진도매로", "한의나라", "허브원", "케이엠몰"];
+// 화면에 보여줄 거래처는 DB에서 만든다. 예전엔 여기 고정돼 있어서 새 거래처(우진헬스케어)를
+// 등록해도 단가가 안 보였다. 아래는 정렬 기준으로만 쓰는 기본 순서다.
+const YANGBANG_ORDER = ["SD바이오", "주사기닷컴", "디에이치몰", "메디오션", "한백상사"];
+const HANBANG_ORDER = ["수진메디칼", "안진도매로", "한의나라", "허브원", "케이엠몰"];
+// '기타'는 배송비·할인 줄에 쓰는 자리표시자라 단가 비교에서 뺀다.
+const VENDOR_EXCLUDE = ["기타"];
 
 // 납품가를 넣을 때 마진이 얼마인지 바로 보여준다. 매번 엑셀로 확인하지 않게.
 // 매입가는 부가세 포함, 납품가는 부가세 별도다. 실제로 주고받는 금액끼리 빼도록
@@ -135,6 +139,7 @@ export default function PriceComparePage() {
 
   // 벤더 ID 맵 (이름 → id)
   const [vendorIdMap, setVendorIdMap] = useState<Record<string, string>>({});
+  const [vendorNames, setVendorNames] = useState<string[]>([]);
 
   // 모달 상태
   const [modalOpen, setModalOpen] = useState(false);
@@ -150,7 +155,7 @@ export default function PriceComparePage() {
     setModalMode("edit");
     setEditingProduct(product);
     const vp: Record<string, string> = {};
-    const vendorList = product.category === "양방" ? YANGBANG_VENDORS : HANBANG_VENDORS;
+    const vendorList = vendorNames;
     vendorList.forEach((v) => {
       vp[v] =
         product.vendors[v] != null
@@ -166,18 +171,18 @@ export default function PriceComparePage() {
       vendorPrices: vp,
     });
     setModalOpen(true);
-  }, []);
+  }, [vendorNames]);
 
   // 모달 열기: 신규
   const openCreateModal = useCallback(() => {
     setModalMode("create");
     setEditingProduct(null);
     const vp: Record<string, string> = {};
-    const vendorList = category === "양방" ? YANGBANG_VENDORS : HANBANG_VENDORS;
+    const vendorList = vendorNames;
     vendorList.forEach((v) => { vp[v] = ""; });
     setFormData({ name: "", spec: "", supply_price: "", vendorPrices: vp });
     setModalOpen(true);
-  }, [category]);
+  }, [vendorNames]);
 
   // 모달 닫기
   const closeModal = useCallback(() => {
@@ -192,7 +197,7 @@ export default function PriceComparePage() {
     setSaving(true);
 
     const supplyPrice = formData.supply_price.trim() === "" ? null : parseInt(formData.supply_price.replace(/[,₩\s]/g, ""), 10);
-    const vendorList = category === "양방" ? YANGBANG_VENDORS : HANBANG_VENDORS;
+    const vendorList = vendorNames;
 
     if (modalMode === "create") {
       // 새 제품 생성
@@ -299,7 +304,7 @@ export default function PriceComparePage() {
     setSaving(false);
     toast.success(modalMode === "create" ? `${formData.name.trim()} 등록했어요.` : "저장했어요.");
     closeModal();
-  }, [formData, modalMode, editingProduct, category, vendorIdMap, closeModal, toast]);
+  }, [formData, modalMode, editingProduct, category, vendorNames, vendorIdMap, closeModal, toast]);
 
   // 삭제 확인
   const handleDeleteConfirm = useCallback(async () => {
@@ -358,7 +363,7 @@ export default function PriceComparePage() {
       // Fetch vendor shipping info
       const { data: vendorsData } = await supabase
         .from("vendors")
-        .select("id, name, shipping_fee, free_shipping_min");
+        .select("id, name, category, shipping_fee, free_shipping_min");
 
       if (vendorsData) {
         setVendorShippingInfo(vendorsData);
@@ -369,7 +374,21 @@ export default function PriceComparePage() {
         setVendorIdMap(idMap);
       }
 
-      const vendorList = category === "양방" ? YANGBANG_VENDORS : HANBANG_VENDORS;
+      // 이 구분에 해당하고(공통 포함) 실제로 단가가 하나라도 있는 거래처만 보여준다
+      const priced = new Set<string>();
+      Object.values(vendorPriceMap).forEach((list) => list.forEach((x) => priced.add(x.vendor_name)));
+      const order = category === "양방" ? YANGBANG_ORDER : HANBANG_ORDER;
+      const vendorList = ((vendorsData as { name: string; category: string | null }[]) || [])
+        .filter((v) => v.category === category || v.category === "공통")
+        .map((v) => v.name)
+        .filter((n) => priced.has(n) && !VENDOR_EXCLUDE.includes(n))
+        .sort((a, b) => {
+          const ia = order.indexOf(a), ib = order.indexOf(b);
+          if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+          return a.localeCompare(b);
+        });
+      setVendorNames(vendorList);
+
       const result: ProductWithPrices[] = productsData.map((p) => {
         const priceEntries = vendorPriceMap[p.id] || [];
         const vendorMap: Record<string, number | null> = {};
@@ -452,7 +471,7 @@ export default function PriceComparePage() {
   }, [products, searchQuery, showOnlyPriceDiff, sortField, sortDir]);
 
   // Vendor summary stats
-  const currentVendors = category === "양방" ? YANGBANG_VENDORS : HANBANG_VENDORS;
+  const currentVendors = vendorNames;
 
   const vendorStats = useMemo(() => {
     const stats: Record<string, { lowestCount: number; totalProducts: number }> = {};
@@ -1145,7 +1164,7 @@ export default function PriceComparePage() {
                   단가를 아직 모르면 <span className="font-medium text-amber-600">{UNKNOWN_MARK}</span> 를 넣으세요. 비워두면 그 거래처는 취급 안 하는 것으로 저장됩니다.
                 </p>
                 <div className="grid grid-cols-1 gap-2">
-                  {(category === "양방" ? YANGBANG_VENDORS : HANBANG_VENDORS).map((v) => (
+                  {vendorNames.map((v) => (
                     <div key={v} className="flex items-center gap-3">
                       <label className="text-sm text-gray-700 w-28 flex-shrink-0 truncate">{v}</label>
                       <input

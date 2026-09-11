@@ -113,11 +113,12 @@ function ProductMatch({
     let cancelled = false;
     const t = setTimeout(async () => {
       setSearching(true);
-      const safe = q.replace(/[%,]/g, "");
+      // or() 는 괄호·쉼표를 문법으로 읽어서 값을 따옴표로 감싼다
+      const safe = q.replace(/["\%]/g, "");
       const { data } = await supabase
         .from("products")
         .select("id, name, spec")
-        .or(`name.ilike.%${safe}%,spec.ilike.%${safe}%`)
+        .or(`name.ilike."%${safe}%",spec.ilike."%${safe}%"`)
         .order("name")
         .limit(20);
       if (cancelled) return;

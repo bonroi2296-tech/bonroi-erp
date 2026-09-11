@@ -84,8 +84,9 @@ export default function ProductsPage() {
 
       if (categoryFilter !== "전체") query = query.eq("category", categoryFilter);
       if (debouncedSearch) {
-        const term = debouncedSearch.replace(/[%,]/g, "");
-        query = query.or(`name.ilike.%${term}%,spec.ilike.%${term}%`);
+        // or() 는 괄호·쉼표를 문법으로 읽는다. 값을 따옴표로 감싸야 "(무침)" 같은 이름도 찾는다.
+        const term = debouncedSearch.replace(/["\%]/g, "");
+        query = query.or(`name.ilike."%${term}%",spec.ilike."%${term}%"`);
       }
 
       const { data, count } = await query
