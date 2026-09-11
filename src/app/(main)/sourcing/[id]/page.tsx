@@ -87,6 +87,59 @@ interface VendorGroup {
   items: VendorItem[];
 }
 
+// ===== 동점 최저가 고르기 =====
+// 최저가가 같은 거래처가 둘 이상이면 자동 배정이 임의로 한 곳을 집는다. 직접 고르게 한다.
+function TieBreaker({
+  options,
+  allocs,
+  onPick,
+}: {
+  options: VendorOption[];
+  allocs: Alloc[];
+  onPick: (o: VendorOption) => void;
+}) {
+  const usable = options.filter((o) => o.available && o.price != null);
+  if (usable.length < 2) return null;
+  const min = Math.min(...usable.map((o) => o.price as number));
+  const tied = usable.filter((o) => o.price === min);
+  if (tied.length < 2) return null;
+
+  const currentId = allocs[0]?.vendor_id ?? null;
+
+  return (
+    <div className="text-xs" onClick={(e) => e.stopPropagation()}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
+          최저가 같은 곳 {tied.length}군데
+        </span>
+        <span className="text-gray-500">{min.toLocaleString()}원 —</span>
+        {tied.map((o) => {
+          const active = o.vendor_id === currentId;
+          return (
+            <button
+              key={o.vendor_id}
+              type="button"
+              onClick={() => onPick(o)}
+              disabled={active}
+              className={`px-2 py-1 rounded-md border ${
+                active
+                  ? "bg-blue-600 text-white border-blue-600 cursor-default"
+                  : "bg-white border-gray-200 hover:bg-blue-50"
+              }`}
+            >
+              {o.vendor_name}
+              {active && " ✓"}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-1 text-[11px] text-gray-400">
+        눌러서 배정을 바꿉니다. 배송비·출고 속도를 보고 고르세요.
+      </p>
+    </div>
+  );
+}
+
 // ===== 품목 매칭 교체 =====
 // 확보 관리에서 품목을 손으로 추가하면 제품이 안 붙는다. 여기서 다시 매칭한다.
 function ProductMatch({
@@ -1202,6 +1255,21 @@ export default function SourcingDetailPage() {
                               demand={d}
                               onMatch={(pid) => matchProduct(d, pid)}
                               onReprice={() => repriceAllocs(d)}
+                            />
+                            <TieBreaker
+                              options={d.product_id ? vendorOptions[d.product_id] ?? [] : []}
+                              allocs={d.sourcing_allocations}
+                              onPick={(o) => {
+                                const first = d.sourcing_allocations[0];
+                                const payload = {
+                                  vendor_id: o.vendor_id,
+                                  vendor_label: null,
+                                  order_qty: first ? first.order_qty : d.required_qty,
+                                  unit_price: o.price,
+                                };
+                                if (first) replaceAlloc(first.id, payload);
+                                else addAlloc(d.id, payload);
+                              }}
                             />
                             <AllocTable
                               allocs={d.sourcing_allocations}
