@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/Toast";
+import QuickProductCreate from "@/components/QuickProductCreate";
 import type { TablesUpdate, TablesInsert } from "@/lib/database.types";
 import ConfirmDialog, { type ConfirmRequest } from "@/components/ConfirmDialog";
 import { ArrowLeft, Plus, Trash2, CheckCircle2, Truck, Upload, X, Sparkles, Copy, ChevronDown, ChevronUp, Repeat2 } from "lucide-react";
@@ -155,6 +156,7 @@ function ProductMatch({
   const [term, setTerm] = useState("");
   const [hits, setHits] = useState<{ id: string; name: string; spec: string | null }[]>([]);
   const [searching, setSearching] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -234,7 +236,7 @@ function ProductMatch({
             <p className="text-[11px] text-gray-400 px-1">찾는 중...</p>
           ) : hits.length === 0 ? (
             <p className="text-[11px] text-gray-400 px-1">
-              {term.trim().length < 2 ? "두 글자 이상 입력하세요" : "결과가 없어요. 제품 화면에서 먼저 등록해주세요."}
+              {term.trim().length < 2 ? "두 글자 이상 입력하세요" : "결과가 없어요."}
             </p>
           ) : (
             <ul className="max-h-48 overflow-auto divide-y divide-gray-100">
@@ -255,6 +257,26 @@ function ProductMatch({
                 </li>
               ))}
             </ul>
+          )}
+          {!creating ? (
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="block text-[11px] font-medium text-emerald-700 hover:text-emerald-900 px-1"
+            >
+              + 찾는 제품이 없으면 새로 등록
+            </button>
+          ) : (
+            <QuickProductCreate
+              defaultName={term.trim() || demand.raw_name}
+              onCancel={() => setCreating(false)}
+              onCreated={(p) => {
+                onMatch(p.id);
+                setCreating(false);
+                setOpen(false);
+                setTerm("");
+              }}
+            />
           )}
           {demand.product_id && (
             <button

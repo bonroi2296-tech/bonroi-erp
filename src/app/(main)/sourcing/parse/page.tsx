@@ -6,6 +6,7 @@ import Link from "next/link";
 import TopBar from "@/components/TopBar";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/components/Toast";
+import QuickProductCreate from "@/components/QuickProductCreate";
 import { ArrowLeft, Sparkles, Trash2, ImageUp, Plus, AlertTriangle, Search } from "lucide-react";
 
 interface Cand {
@@ -98,10 +99,12 @@ export default function ParseOrderPage() {
     setSearchQ(prefill);
     setSearchResults([]);
   };
+  const [registering, setRegistering] = useState(false);
   const closeSearch = () => {
     setSearchFor(null);
     setSearchQ("");
     setSearchResults([]);
+    setRegistering(false);
   };
   const pickProduct = (i: number, p: Cand) => {
     setLines((prev) =>
@@ -496,6 +499,30 @@ export default function ParseOrderPage() {
                             </button>
                           ))}
                         </div>
+                        {!registering ? (
+                          <button
+                            onClick={() => setRegistering(true)}
+                            className="mt-1.5 text-xs font-medium text-emerald-700 hover:text-emerald-900"
+                          >
+                            + 찾는 제품이 없으면 새로 등록
+                          </button>
+                        ) : (
+                          <QuickProductCreate
+                            defaultName={searchQ.trim() || l.raw_name}
+                            onCancel={() => setRegistering(false)}
+                            onCreated={(p) =>
+                              pickProduct(i, {
+                                id: p.id,
+                                name: p.name,
+                                spec: p.spec,
+                                vendor: p.vendor,
+                                vendor_id: p.vendor_id,
+                                price: p.price,
+                                sourceable: p.vendor_id != null,
+                              })
+                            }
+                          />
+                        )}
                       </div>
                     )}
                     {l.note && (
