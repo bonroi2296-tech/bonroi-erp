@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { generateJson, isGeminiBusy, isGeminiDailyQuota, isGeminiQuota } from "@/lib/gemini";
 import { createClient } from "@supabase/supabase-js";
 import { orderSpecTokens, productSpecTokens, specRelation, shouldAskSpec } from "@/lib/spec-match";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 interface GLine {
   raw_name: string;
@@ -128,27 +129,7 @@ export async function POST(request: Request) {
       { text: `\n[카탈로그]\n${catalogText}` },
     ];
 
-    // 빠른 모델 우선(thinking 끔). 과부하 시 즉시 폴백(sleep 없음).
-    const genOnce = async (parts: Array<Record<string, unknown>>): Promise<string> => {
-      // 모델 이름은 환경변수로 관리(쉼표 구분 폴백 가능). 미설정 시 안전한 기본값.
-      const envModels = (process.env.GEMINI_MODEL || "gemini-3.5-flash,gemini-2.5-flash")
-        .split(",").map((s) => s.trim()).filter(Boolean);
-      const models = envModels.length ? envModels : ["gemini-3.5-flash", "gemini-2.5-flash"];
-      let lastErr: unknown = null;
-      for (const model of models) {
-        try {
-          const cfg: Record<string, unknown> = { responseMimeType: "application/json", temperature: 0 };
-          if (!model.startsWith("gemini-2.0")) cfg.thinkingConfig = { thinkingBudget: 0 };
-          const r = await ai.models.generateContent({ model, contents: [{ role: "user", parts }], config: cfg });
-          return r.text ?? "";
-        } catch (e) {
-          lastErr = e;
-          const msg = String(e instanceof Error ? e.message : e);
-          if (!/(503|429|UNAVAILABLE|overload|high demand|RESOURCE_EXHAUSTED)/i.test(msg)) throw e;
-        }
-      }
-      throw lastErr ?? new Error("모델 응답 없음");
-    };
+    const genOnce = (parts: Array<Record<string, unknown>>) => generateJson(ai, parts);
 
     if (imageBase64) {
       const parts = [...base];
@@ -156,9 +137,9 @@ export async function POST(request: Request) {
       parts.push({ inlineData: { mimeType: imageMimeType || "image/png", data: imageBase64 } });
       glines = extractJson(await genOnce(parts));
     } else {
-      // 긴 주문은 줄 단위로 쪼개 병렬 처리(10초 함수 제한 대응)
+      // 긴 주문만 쪼갠다. 쪼갤수록 AI 호출이 늘어 무료 요금제 하루 한도를 빨리 쓴다.
       const allLines = (text || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-      const CH = 18;
+      const CH = 30;
       const chunks: string[] = [];
       for (let i = 0; i < allLines.length; i += CH) chunks.push(allLines.slice(i, i + CH).join("\n"));
       if (chunks.length === 0) chunks.push(text || "");
@@ -168,8 +149,12 @@ export async function POST(request: Request) {
       glines = results.flatMap((t) => extractJson(t));
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    const friendly = /(503|UNAVAILABLE|overload|high demand|429|RESOURCE_EXHAUSTED)/i.test(msg)
+    console.error("[parse-order] Gemini 실패:", e instanceof Error ? e.message : e);
+    const friendly = isGeminiDailyQuota(e)
+      ? "오늘 AI 분석 한도(무료 요금제)를 다 썼어요. 내일 다시 되거나, 구글 AI 결제를 켜면 바로 풀려요."
+      : isGeminiQuota(e)
+      ? "AI 사용 한도에 걸렸어요. 1분쯤 뒤에 'AI 분석'을 다시 눌러주세요."
+      : isGeminiBusy(e)
       ? "Gemini가 지금 과부하예요. 잠시 후 'AI 분석'을 다시 눌러주세요."
       : "AI 분석에 실패했어요. 잠시 후 다시 시도해 주세요.";
     return NextResponse.json({ error: friendly }, { status: 502 });

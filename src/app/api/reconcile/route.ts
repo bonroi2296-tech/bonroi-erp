@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { generateJson, isGeminiBusy, isGeminiDailyQuota, isGeminiQuota } from "@/lib/gemini";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 interface RItem {
   line_index: number;
@@ -114,33 +115,19 @@ export async function POST(request: Request) {
       { text: SYS },
       { text: `\n[발주품목]\n${catalogText}` },
     ];
-    const genOnce = async (parts: Array<Record<string, unknown>>): Promise<string> => {
-      const envModels = (process.env.GEMINI_MODEL || "gemini-3.5-flash,gemini-2.5-flash")
-        .split(",").map((s) => s.trim()).filter(Boolean);
-      const models = envModels.length ? envModels : ["gemini-3.5-flash", "gemini-2.5-flash"];
-      let lastErr: unknown = null;
-      for (const model of models) {
-        try {
-          const cfg: Record<string, unknown> = { responseMimeType: "application/json", temperature: 0 };
-          if (!model.startsWith("gemini-2.0")) cfg.thinkingConfig = { thinkingBudget: 0 };
-          const r = await ai.models.generateContent({ model, contents: [{ role: "user", parts }], config: cfg });
-          return r.text ?? "";
-        } catch (e) {
-          lastErr = e;
-          const msg = String(e instanceof Error ? e.message : e);
-          if (!/(503|429|UNAVAILABLE|overload|high demand|RESOURCE_EXHAUSTED)/i.test(msg)) throw e;
-        }
-      }
-      throw lastErr ?? new Error("모델 응답 없음");
-    };
+    const genOnce = (parts: Array<Record<string, unknown>>) => generateJson(ai, parts);
 
     const parts = [...base];
     if (text?.trim()) parts.push({ text: `\n[출고확인서]\n${text.trim()}` });
     if (imageBase64) parts.push({ inlineData: { mimeType: imageMimeType || "image/png", data: imageBase64 } });
     doc = extractDoc(await genOnce(parts));
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    const friendly = /(503|UNAVAILABLE|overload|high demand|429|RESOURCE_EXHAUSTED)/i.test(msg)
+    console.error("[reconcile] Gemini 실패:", e instanceof Error ? e.message : e);
+    const friendly = isGeminiDailyQuota(e)
+      ? "오늘 AI 분석 한도(무료 요금제)를 다 썼어요. 내일 다시 되거나, 구글 AI 결제를 켜면 바로 풀려요."
+      : isGeminiQuota(e)
+      ? "AI 사용 한도에 걸렸어요. 1분쯤 뒤에 다시 시도해 주세요."
+      : isGeminiBusy(e)
       ? "Gemini가 지금 과부하예요. 잠시 후 다시 시도해 주세요."
       : "출고확인서 분석에 실패했어요. 잠시 후 다시 시도해 주세요.";
     return NextResponse.json({ error: friendly }, { status: 502 });
