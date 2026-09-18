@@ -748,7 +748,78 @@ export default function PriceComparePage() {
               <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full" />
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            {/* 폰: 거래처가 12곳까지 늘어나는 표는 옆으로 못 본다. 품목 카드 + 싼 순서 목록으로 편다 */}
+            <div className="md:hidden divide-y divide-gray-100">
+              {filteredProducts.length === 0 ? (
+                <div className="p-8 text-center text-gray-400 text-sm">조건에 맞는 품목이 없습니다.</div>
+              ) : (
+                filteredProducts.map((p) => {
+                  const prices = Object.values(p.vendors).filter((v): v is number => v !== null);
+                  const minPrice = prices.length > 0 ? Math.min(...prices) : null;
+                  const listed = currentVendors
+                    .map((v) => ({
+                      vendor: v,
+                      price: p.vendors[v] ?? null,
+                      unknown: p.vendors[v] == null && p.vendorsUnknown?.[v] === true,
+                    }))
+                    .filter((x) => x.price !== null || x.unknown)
+                    .sort((a, b) => (a.price ?? Number.MAX_SAFE_INTEGER) - (b.price ?? Number.MAX_SAFE_INTEGER));
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => openEditModal(p)}
+                      className="w-full text-left px-4 py-3 hover:bg-blue-50/30 active:bg-blue-50"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-900 text-sm break-words">{p.name}</div>
+                          {p.spec && <div className="text-xs text-gray-500 mt-0.5">{p.spec}</div>}
+                        </div>
+                        {p.price_diff_pct !== null && (
+                          <span
+                            className={`flex-shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                              p.price_diff_pct > 30
+                                ? "bg-red-100 text-red-700"
+                                : p.price_diff_pct > 10
+                                ? "bg-yellow-100 text-yellow-700"
+                                : "bg-green-100 text-green-700"
+                            }`}
+                          >
+                            차이 {p.price_diff_pct}%
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 text-xs text-gray-600">
+                        납품가 <span className="font-medium text-gray-800">{formatPrice(p.supply_price)}</span>
+                      </div>
+                      {listed.length > 0 && (
+                        <ul className="mt-2 space-y-1">
+                          {listed.map((x) => {
+                            const isLowest = x.price !== null && x.price === minPrice;
+                            return (
+                              <li
+                                key={x.vendor}
+                                className={`flex items-center justify-between gap-3 text-xs px-2 py-1 rounded ${
+                                  isLowest ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-gray-600"
+                                }`}
+                              >
+                                <span className="truncate">{x.vendor}</span>
+                                <span className={`flex-shrink-0 ${x.unknown ? "text-amber-600" : ""}`}>
+                                  {x.price !== null ? formatPrice(x.price) : UNKNOWN_MARK}
+                                  {isLowest && <span className="ml-0.5">✓</span>}
+                                </span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-xs md:text-sm min-w-[800px]">
                 <thead>
                   <tr className="bg-gray-50 text-gray-500 border-b border-gray-100">
@@ -863,6 +934,7 @@ export default function PriceComparePage() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </div>
 

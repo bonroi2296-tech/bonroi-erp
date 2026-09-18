@@ -597,36 +597,36 @@ export default function ReturnsPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-xs md:text-sm min-w-[1200px]">
+              <table className="w-full text-xs md:text-sm md:min-w-[1200px]">
                 <thead>
                   <tr className="bg-gray-50 text-gray-500">
-                    <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">날짜</th>
-                    <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">지점</th>
-                    <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">품목</th>
-                    <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">유형</th>
-                    <th className="text-left px-4 md:px-5 py-2.5 md:py-3 font-medium">사유</th>
-                    <th className="text-right px-4 md:px-5 py-2.5 md:py-3 font-medium">수량</th>
-                    <th className="text-right px-4 md:px-5 py-2.5 md:py-3 font-medium">반송비용</th>
-                    <th className="text-center px-4 md:px-5 py-2.5 md:py-3 font-medium">비용처리</th>
-                    <th className="text-center px-4 md:px-5 py-2.5 md:py-3 font-medium">상태</th>
-                    <th className="text-center px-4 md:px-5 py-2.5 md:py-3 font-medium">액션</th>
+                    <th className="text-left px-2.5 md:px-5 py-2.5 md:py-3 font-medium">날짜</th>
+                    <th className="hidden md:table-cell text-left px-2.5 md:px-5 py-2.5 md:py-3 font-medium">지점</th>
+                    <th className="text-left px-2.5 md:px-5 py-2.5 md:py-3 font-medium">품목</th>
+                    <th className="hidden md:table-cell text-left px-2.5 md:px-5 py-2.5 md:py-3 font-medium">유형</th>
+                    <th className="hidden md:table-cell text-left px-2.5 md:px-5 py-2.5 md:py-3 font-medium">사유</th>
+                    <th className="text-right px-2.5 md:px-5 py-2.5 md:py-3 font-medium">수량</th>
+                    <th className="hidden md:table-cell text-right px-2.5 md:px-5 py-2.5 md:py-3 font-medium">반송비용</th>
+                    <th className="hidden md:table-cell text-center px-2.5 md:px-5 py-2.5 md:py-3 font-medium">비용처리</th>
+                    <th className="text-center px-2.5 md:px-5 py-2.5 md:py-3 font-medium">상태</th>
+                    <th className="text-center px-2.5 md:px-5 py-2.5 md:py-3 font-medium">액션</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {returns.map((returnItem) => (
                     <tr key={returnItem.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 md:px-5 py-2.5 md:py-3 text-gray-600">
+                      <td className="px-2.5 md:px-5 py-2.5 md:py-3 text-gray-600">
                         {returnItem.created_at
                           ? new Date(returnItem.created_at).toLocaleDateString("ko-KR")
                           : "-"}
                       </td>
-                      <td className="px-4 md:px-5 py-2.5 md:py-3 text-gray-600">
+                      <td className="hidden md:table-cell px-2.5 md:px-5 py-2.5 md:py-3 text-gray-600">
                         {returnItem.order_item?.order_ref?.branch_ref?.name || "-"}
                       </td>
-                      <td className="px-4 md:px-5 py-2.5 md:py-3 font-medium text-gray-900">
+                      <td className="px-2.5 md:px-5 py-2.5 md:py-3 font-medium text-gray-900">
                         {returnItem.order_item?.product?.name || "-"}
                       </td>
-                      <td className="px-4 md:px-5 py-2.5 md:py-3">
+                      <td className="hidden md:table-cell px-2.5 md:px-5 py-2.5 md:py-3">
                         <span
                           className={`px-2 py-0.5 md:px-2.5 md:py-1 rounded-full text-xs font-medium ${
                             returnItem.return_type === "hospital_request"
@@ -639,16 +639,16 @@ export default function ReturnsPage() {
                             : "본로이 과실"}
                         </span>
                       </td>
-                      <td className="px-4 md:px-5 py-2.5 md:py-3 text-gray-600 text-xs md:text-sm max-w-xs truncate">
+                      <td className="hidden md:table-cell px-2.5 md:px-5 py-2.5 md:py-3 text-gray-600 text-xs md:text-sm max-w-xs truncate">
                         {returnItem.reason}
                       </td>
-                      <td className="px-4 md:px-5 py-2.5 md:py-3 text-right text-gray-600">
+                      <td className="px-2.5 md:px-5 py-2.5 md:py-3 text-right text-gray-600">
                         {returnItem.quantity}
                       </td>
-                      <td className="px-4 md:px-5 py-2.5 md:py-3 text-right text-gray-900 font-medium">
+                      <td className="hidden md:table-cell px-2.5 md:px-5 py-2.5 md:py-3 text-right text-gray-900 font-medium">
                         ₩{(returnItem.return_cost || 0).toLocaleString()}
                       </td>
-                      <td className="px-4 md:px-5 py-2.5 md:py-3 text-center">
+                      <td className="hidden md:table-cell px-2.5 md:px-5 py-2.5 md:py-3 text-center">
                         <input
                           type="checkbox"
                           checked={returnItem.charge_cost}
@@ -656,7 +656,7 @@ export default function ReturnsPage() {
                           className="w-4 h-4 text-blue-600 rounded cursor-not-allowed"
                         />
                       </td>
-                      <td className="px-4 md:px-5 py-2.5 md:py-3 text-center">
+                      <td className="px-2.5 md:px-5 py-2.5 md:py-3 text-center">
                         <select
                           value={returnItem.status}
                           onChange={(e) => handleStatusChange(returnItem.id, e.target.value)}
@@ -670,7 +670,7 @@ export default function ReturnsPage() {
                           <option value="rejected">{statusLabels.rejected}</option>
                         </select>
                       </td>
-                      <td className="px-4 md:px-5 py-2.5 md:py-3 text-center">
+                      <td className="px-2.5 md:px-5 py-2.5 md:py-3 text-center">
                         <button className="text-blue-600 hover:text-blue-700 text-xs font-medium">
                           상세보기
                         </button>
