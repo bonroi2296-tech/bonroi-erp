@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 
+// 저장소에 둘 수 없는 값(계좌번호·거래처 담당자)을 환경변수에서 읽는다. 형식이 깨져도 명세서는 나가게 한다.
+function privateValues(): { bankInfo?: string; branchExtra?: Record<string, { phone: string; receiver: string }> } {
+  try {
+    return JSON.parse(process.env.INVOICE_PRIVATE || "{}");
+  } catch {
+    console.error("[invoice] INVOICE_PRIVATE 형식이 JSON 이 아니다 — 계좌·담당자 칸은 빈칸으로 나간다");
+    return {};
+  }
+}
+
 // 본로이 (공급자) 정보
 const SUPPLIER = {
   name: "본로이",
@@ -10,15 +20,16 @@ const SUPPLIER = {
   address: "서울시 강서구 강서로 385, 613호",
   phone: "070-7500-7795",
   fax: "02-6455-7049",
-  bankInfo: "기업 011-129417-04-020   예 금 주 : 본 로 이",
+  // 계좌번호와 거래처 담당자 이름은 저장소에 두지 않는다 — 이 저장소는 «공개»다(2026-09-23).
+  //   값은 Vercel 환경변수 INVOICE_PRIVATE(JSON)에 있다:
+  //   {"bankInfo":"…","branchExtra":{"병원이름":{"phone":"…","receiver":"…"}}}
+  //   없으면 그 칸만 빈칸으로 나간다(명세서 생성 자체는 계속 된다).
+  bankInfo: privateValues().bankInfo || "",
 };
 
-// 병원별 추가 정보
-const BRANCH_EXTRA: Record<string, { phone: string; receiver: string }> = {
-  "광명면력한방병원": { phone: "0507-1331-1076", receiver: "황미숙" },
-  "강서면력한방병원": { phone: "", receiver: "" },
-  "신촌면력한방병원": { phone: "", receiver: "" },
-};
+// 병원별 추가 정보 — 담당자 실명·지점 전화는 남의 개인정보라 환경변수에서 읽는다.
+const BRANCH_EXTRA: Record<string, { phone: string; receiver: string }> =
+  privateValues().branchExtra || {};
 
 // raw_product_name에서 품목명/규격 분리
 function splitProductName(raw: string): { name: string; spec: string } {
