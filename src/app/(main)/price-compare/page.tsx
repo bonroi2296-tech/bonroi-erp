@@ -29,6 +29,7 @@ interface ProductWithPrices {
   spec: string | null;
   category: string | null;
   supply_price: number | null;
+  edi_code: string | null;
   vendors: Record<string, number | null>;
   // 취급은 하는데 단가를 모르는 거래처. vendors 가 null 인 것과 구분해 "/" 로 보여준다.
   vendorsUnknown: Record<string, boolean>;
@@ -56,6 +57,7 @@ interface ProductFormData {
   name: string;
   spec: string;
   supply_price: string;
+  edi_code: string;
   vendorPrices: Record<string, string>;
 }
 
@@ -146,7 +148,7 @@ export default function PriceComparePage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("edit");
   const [editingProduct, setEditingProduct] = useState<ProductWithPrices | null>(null);
-  const [formData, setFormData] = useState<ProductFormData>({ name: "", spec: "", supply_price: "", vendorPrices: {} });
+  const [formData, setFormData] = useState<ProductFormData>({ name: "", spec: "", supply_price: "", edi_code: "", vendorPrices: {} });
   const [saving, setSaving] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ProductWithPrices | null>(null);
@@ -169,6 +171,7 @@ export default function PriceComparePage() {
       name: product.name,
       spec: product.spec ?? "",
       supply_price: product.supply_price != null ? String(product.supply_price) : "",
+      edi_code: product.edi_code ?? "",
       vendorPrices: vp,
     });
     setModalOpen(true);
@@ -181,7 +184,7 @@ export default function PriceComparePage() {
     const vp: Record<string, string> = {};
     const vendorList = vendorNames;
     vendorList.forEach((v) => { vp[v] = ""; });
-    setFormData({ name: "", spec: "", supply_price: "", vendorPrices: vp });
+    setFormData({ name: "", spec: "", supply_price: "", edi_code: "", vendorPrices: vp });
     setModalOpen(true);
   }, [vendorNames]);
 
@@ -189,7 +192,7 @@ export default function PriceComparePage() {
   const closeModal = useCallback(() => {
     setModalOpen(false);
     setEditingProduct(null);
-    setFormData({ name: "", spec: "", supply_price: "", vendorPrices: {} });
+    setFormData({ name: "", spec: "", supply_price: "", edi_code: "", vendorPrices: {} });
   }, []);
 
   // 저장 (생성 / 수정)
@@ -204,8 +207,8 @@ export default function PriceComparePage() {
       // 새 제품 생성
       const { data: newProduct, error } = await supabase
         .from("products")
-        .insert({ name: formData.name.trim(), spec: formData.spec.trim(), category, supply_price: supplyPrice })
-        .select("id, name, spec, category, supply_price")
+        .insert({ name: formData.name.trim(), spec: formData.spec.trim(), category, supply_price: supplyPrice, edi_code: formData.edi_code.trim() || null })
+        .select("id, name, spec, category, supply_price, edi_code")
         .single();
 
       if (error || !newProduct) {
@@ -249,7 +252,7 @@ export default function PriceComparePage() {
 
       setProducts((prev) => [...prev, {
         id: newProduct.id, name: newProduct.name, spec: newProduct.spec, category: newProduct.category,
-        supply_price: supplyPrice, vendors: vendorMap, vendorsUnknown: unknownMap, lowest_price: lowestPrice, lowest_vendor: lowestVendor, price_diff_pct: priceDiffPct,
+        supply_price: supplyPrice, edi_code: formData.edi_code.trim() || null, vendors: vendorMap, vendorsUnknown: unknownMap, lowest_price: lowestPrice, lowest_vendor: lowestVendor, price_diff_pct: priceDiffPct,
       }]);
 
     } else if (editingProduct) {
@@ -258,6 +261,7 @@ export default function PriceComparePage() {
         name: formData.name.trim(),
         spec: formData.spec.trim(),
         supply_price: supplyPrice,
+        edi_code: formData.edi_code.trim() || null,
       }).eq("id", editingProduct.id);
 
       // 벤더 단가 업데이트
@@ -297,7 +301,7 @@ export default function PriceComparePage() {
 
       setProducts((prev) => prev.map((p) =>
         p.id === editingProduct.id
-          ? { ...p, name: formData.name.trim(), spec: formData.spec.trim(), supply_price: supplyPrice, vendors: vendorMap, vendorsUnknown: unknownMap, lowest_price: lowestPrice, lowest_vendor: lowestVendor, price_diff_pct: priceDiffPct }
+          ? { ...p, name: formData.name.trim(), spec: formData.spec.trim(), supply_price: supplyPrice, edi_code: formData.edi_code.trim() || null, vendors: vendorMap, vendorsUnknown: unknownMap, lowest_price: lowestPrice, lowest_vendor: lowestVendor, price_diff_pct: priceDiffPct }
           : p
       ));
     }
@@ -332,7 +336,7 @@ export default function PriceComparePage() {
       // Fetch products
       const { data: productsData } = await supabase
         .from("products")
-        .select("id, name, spec, category, supply_price")
+        .select("id, name, spec, category, supply_price, edi_code")
         .eq("category", category)
         .order("name");
 
@@ -428,6 +432,7 @@ export default function PriceComparePage() {
           spec: p.spec,
           category: p.category,
           supply_price: p.supply_price,
+          edi_code: p.edi_code,
           vendors: vendorMap,
           vendorsUnknown: unknownMap,
           lowest_price: lowestPrice,
@@ -1140,6 +1145,16 @@ export default function PriceComparePage() {
                     onChange={(e) => setFormData({ ...formData, spec: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="예: 100매/팩"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">EDI 코드</label>
+                  <input
+                    type="text"
+                    value={formData.edi_code}
+                    onChange={(e) => setFormData({ ...formData, edi_code: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="식약처 EDI/UDI-DI (선택)"
                   />
                 </div>
                 <div>
