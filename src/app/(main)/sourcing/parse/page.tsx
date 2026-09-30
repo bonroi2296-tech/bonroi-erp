@@ -251,6 +251,8 @@ export default function ParseOrderPage() {
   const create = async () => {
     const valid = lines.filter((l) => l.raw_name.trim());
     if (!title.trim()) return toast.error("발주건 제목을 입력하세요.");
+    // 지점이 없으면 완료 처리해도 주문 내역(branches!inner)에서 빠져 장부에 안 잡힌다
+    if (!branchId) return toast.error("지점을 골라주세요. 지점이 없으면 완료해도 주문 내역에 안 올라갑니다.");
     if (valid.length === 0) return toast.error("품목이 없습니다.");
     setCreating(true);
     try {
@@ -258,7 +260,7 @@ export default function ParseOrderPage() {
         .from("sourcing_jobs")
         .insert({
           title: title.trim(),
-          branch_id: branchId || null,
+          branch_id: branchId,
           requester: requester.trim() || null,
           delivery_note: deliveryNote.trim() || null,
           note: "AI 파싱 인입",

@@ -98,6 +98,8 @@ export default function SourcingPage() {
   const handleCreate = async () => {
     const validDemands = demands.filter((d) => d.raw_name.trim());
     if (!title.trim()) return toast.error("발주건 제목을 입력하세요.");
+    // 지점이 없으면 완료 처리해도 주문 내역(branches!inner)에서 빠져 장부에 안 잡힌다
+    if (!branchId) return toast.error("지점을 골라주세요. 지점이 없으면 완료해도 주문 내역에 안 올라갑니다.");
     if (validDemands.length === 0) return toast.error("품목을 1개 이상 입력하세요.");
 
     setSaving(true);
@@ -106,7 +108,7 @@ export default function SourcingPage() {
         .from("sourcing_jobs")
         .insert({
           title: title.trim(),
-          branch_id: branchId || null,
+          branch_id: branchId,
           requester: requester.trim() || null,
           delivery_note: deliveryNote.trim() || null,
         })
