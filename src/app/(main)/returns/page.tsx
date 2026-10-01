@@ -64,6 +64,8 @@ interface SummaryStats {
   total_return_cost: number;
 }
 
+const today = () => new Date().toISOString().slice(0, 10);
+
 const statusColors: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-700",
   processing: "bg-blue-100 text-blue-700",
@@ -96,6 +98,7 @@ export default function ReturnsPage() {
 
   // Form state
   const [formData, setFormData] = useState({
+    return_date: today(),
     return_type: "hospital_request" as "hospital_request" | "our_mistake",
     reason: "",
     quantity: 1,
@@ -177,7 +180,7 @@ export default function ReturnsPage() {
   // 원주문과 같은 지점·거래처로 새 주문을 만들고 품목명 뒤에 "반품"을 붙인다.
   async function writeReturnToLedger(
     item: OrderItem,
-    form: { quantity: number; return_cost: number; charge_cost: boolean }
+    form: { quantity: number; return_cost: number; charge_cost: boolean; return_date: string }
   ): Promise<string | null> {
     const order = item.order_ref;
     if (!order?.branch_id) return "원주문의 지점 정보가 없어요.";
@@ -235,7 +238,7 @@ export default function ReturnsPage() {
       .from("orders")
       .insert({
         order_number: await nextOrderNumber(),
-        order_date: new Date().toISOString().slice(0, 10),
+        order_date: form.return_date || today(),
         branch_id: order.branch_id,
         vendor_name: order.vendor_name,
         category: order.category ?? "양방",
@@ -278,6 +281,10 @@ export default function ReturnsPage() {
       return;
     }
 
+    if (!formData.return_date) {
+      toast.error("반품일을 넣어주세요");
+      return;
+    }
     if (formData.quantity <= 0 || !formData.reason) {
       toast.error("필수 항목을 입력해주세요");
       return;
@@ -293,6 +300,8 @@ export default function ReturnsPage() {
         charge_cost: formData.charge_cost,
         status: "pending",
         notes: formData.notes,
+        // 목록 날짜와 장부 날짜를 맞춘다. 자정으로 넣으면 시차 때문에 하루 밀려서 정오로 넣는다.
+        created_at: `${formData.return_date}T12:00:00+09:00`,
       },
     ]);
 
@@ -312,6 +321,7 @@ export default function ReturnsPage() {
     setShowModal(false);
     setSelectedOrderItem(null);
     setFormData({
+      return_date: today(),
       return_type: "hospital_request",
       reason: "",
       quantity: 1,
@@ -450,6 +460,19 @@ export default function ReturnsPage() {
                       </p>
                     </div>
                   )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    반품일 *
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.return_date}
+                    onChange={(e) => setFormData({ ...formData, return_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">주문 내역에 이 날짜로 올라갑니다</p>
                 </div>
 
                 {/* Return Type */}
