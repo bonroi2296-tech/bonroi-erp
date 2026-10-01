@@ -821,8 +821,9 @@ export default function SourcingDetailPage() {
           });
         }
       }
-      // 배송비는 매입만 있고 납품가 0 → 마진은 매입 공급가액만큼 마이너스
-      if (fee > 0) {
+      // 배송비는 매입만 있고 납품가 0 → 마진은 매입 공급가액만큼 마이너스.
+      // 마이너스(할인)도 줄을 만든다. 예전엔 0 초과만 넣어서 할인이 주문 내역에서 사라졌다.
+      if (fee !== 0) {
         const v = vatOf(fee, 0);
         lineItems.push({
           order_id: "",
