@@ -118,6 +118,12 @@ export default function ReturnsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const t = setTimeout(() => fetchOrderItems(searchQuery), 250);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery]);
+
   async function fetchReturns() {
     const { data } = await supabase
       .from("returns")
@@ -148,8 +154,9 @@ export default function ReturnsPage() {
     setSummaryStats(stats);
   }
 
-  async function fetchOrderItems() {
-    const { data } = await supabase
+  // 주문 품목이 1700줄이 넘어서 전부 받아 걸러내면 찾는 게 안 보인다. 검색은 DB에서 한다.
+  async function fetchOrderItems(q = "") {
+    let query = supabase
       .from("order_items")
       .select(
         `id, product_id, quantity, purchase_price, supply_price, raw_product_name, edi_code,
@@ -157,10 +164,12 @@ export default function ReturnsPage() {
         product:products(name, spec)`
       )
       // 이미 반품된 줄(마이너스)을 또 고르면 "반품 반품" 이 생긴다. 판매 줄만 고르게 한다.
-      .gt("quantity", 0)
-      .order("id", { ascending: false })
-      .limit(500);
+      .gt("quantity", 0);
 
+    const term = q.trim();
+    if (term) query = query.ilike("raw_product_name", `%${term.replace(/[%_]/g, "")}%`);
+
+    const { data } = await query.order("created_at", { ascending: false }).limit(term ? 50 : 30);
     setOrderItems((data as unknown as OrderItem[]) || []);
   }
 
@@ -331,11 +340,7 @@ export default function ReturnsPage() {
     fetchReturns();
   }
 
-  const filteredOrderItems = orderItems.filter(
-    (item) =>
-      (item.product?.name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.product?.spec || "").toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredOrderItems = orderItems;
 
   return (
     <>
@@ -422,11 +427,11 @@ export default function ReturnsPage() {
                             className="w-full text-left px-4 py-2 hover:bg-gray-100 border-b border-gray-100 last:border-b-0 text-sm"
                           >
                             <div className="font-medium text-gray-900">
-                              {item.product?.name}
+                              {item.raw_product_name || item.product?.name || "(이름 없음)"}
                             </div>
                             <div className="text-xs text-gray-500">
-                              {item.product?.spec} | {item.order_ref?.order_date} |{" "}
-                              {item.order_ref?.branch_ref?.name}
+                              {item.order_ref?.order_date} | {item.order_ref?.branch_ref?.name} |{" "}
+                              {item.order_ref?.vendor_name} | {item.quantity}개
                             </div>
                           </button>
                         ))}
