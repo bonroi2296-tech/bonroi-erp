@@ -356,6 +356,22 @@ function vatOf(totalPurchase: number, totalSupply: number) {
   };
 }
 const won = (n: number) => `${Math.round(n).toLocaleString()}원`;
+// 발주건의 "주문 날짜" 기본값: 제목에 적힌 날짜(2026-09-15 / 9-15 둘 다) → 만든 날 → 오늘.
+// 제목에 월-일만 적는 습관이 있어서 연도는 만든 날에서 가져온다.
+function guessOrderDate(title?: string | null, createdAt?: string | null): string {
+  const base = (createdAt ?? new Date().toISOString()).slice(0, 10);
+  const t = (title ?? "").trim();
+  const full = t.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  const md = full ? null : t.match(/(?:^|[^\d])(\d{1,2})[-.](\d{1,2})(?!\d)/);
+  const p = (y: string, m: string, d: string) =>
+    `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  if (full) return p(full[1], full[2], full[3]);
+  if (md) {
+    const m = Number(md[1]), d = Number(md[2]);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) return p(base.slice(0, 4), md[1], md[2]);
+  }
+  return base;
+}
 // 규칙형 거래처 자동 배송비: 소계가 무료기준 이상이면 0, 아니면 정액
 function autoShip(g: { policy: string; freeMin: number; flatFee: number; subtotal: number }): number {
   if (g.policy !== "auto") return 0;
@@ -373,6 +389,8 @@ export default function SourcingDetailPage() {
   const [reconcileFor, setReconcileFor] = useState<VendorGroup | null>(null);
   // 완료 처리 중인 거래처(연타 방지). ref 는 즉시 반영돼 같은 클릭 묶음도 막는다.
   const [completing, setCompleting] = useState<Set<string>>(new Set());
+  // 주문 내역에 찍힐 날짜. 발주건 날짜를 기본으로 두되 완료 전에 바꿀 수 있다.
+  const [orderDate, setOrderDate] = useState("");
   const completingRef = useRef<Set<string>>(new Set());
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const toggleExpand = (id: string) => {
@@ -427,6 +445,7 @@ export default function SourcingDetailPage() {
       const j = data as unknown as Job;
       j.demand_lines = (j.demand_lines || []).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
       setJob(j);
+      setOrderDate((prev) => prev || guessOrderDate(j.title, j.created_at));
 
       supabase
         .from("sourcing_settlements")
@@ -731,13 +750,7 @@ export default function SourcingDetailPage() {
     fetchJob();
   };
 
-  // 발주건의 "주문 날짜": 제목이 날짜면 그걸, 아니면 생성일, 그래도 없으면 오늘
-  const orderDateOf = (): string => {
-    const t = (job?.title ?? "").trim();
-    if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.slice(0, 10);
-    if (job?.created_at) return job.created_at.slice(0, 10);
-    return new Date().toISOString().slice(0, 10);
-  };
+  const orderDateOf = (): string => guessOrderDate(job?.title, job?.created_at);
   const nextOrderNumber = async (): Promise<string> => {
     const { data, error } = await supabase.rpc("next_order_number");
     if (!error && typeof data === "string") return data;
@@ -852,7 +865,7 @@ export default function SourcingDetailPage() {
           .insert({
             order_number: await nextOrderNumber(),
             branch_id: job?.branch_id ?? null,
-            order_date: orderDateOf(),
+            order_date: orderDate || orderDateOf(),
             status: "완료",
             category,
             vendor_name: g.name,
@@ -1076,7 +1089,16 @@ export default function SourcingDetailPage() {
               <Truck className="w-4 h-4 text-gray-500" />
               <h2 className="text-sm font-bold text-gray-900">거래처별 주문서</h2>
               <span className="text-xs text-gray-400">거래처마다 이 목록대로 주문하고, 출고확인서를 반영하면 완료 → 주문 내역에 쌓입니다</span>
-              <span className="ml-auto text-sm text-gray-900 font-bold">총 매입원가 {won(jobItems + jobShip)}</span>
+              <label className="ml-auto flex items-center gap-1.5 text-xs text-gray-500" title="완료 처리할 때 주문 내역에 찍히는 날짜입니다. 이미 완료한 건은 바뀌지 않습니다.">
+                주문 날짜
+                <input
+                  type="date"
+                  value={orderDate}
+                  onChange={(e) => setOrderDate(e.target.value)}
+                  className="px-2 py-1 border border-gray-200 rounded-md text-xs text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </label>
+              <span className="text-sm text-gray-900 font-bold">총 매입원가 {won(jobItems + jobShip)}</span>
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
               {groups.map((g) => (
