@@ -119,7 +119,7 @@ export default function OrdersPage() {
 
   const [newBranchId, setNewBranchId] = useState("");
   const [newDate, setNewDate] = useState(new Date().toISOString().split("T")[0]);
-  const [newStatus, setNewStatus] = useState("대기");
+  const [newStatus, setNewStatus] = useState("완료");
   const [newNote, setNewNote] = useState("");
   const [newItems, setNewItems] = useState<NewOrderItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -208,7 +208,7 @@ export default function OrdersPage() {
     setNewItems([]);
     setNewBranchId("");
     setNewDate(new Date().toISOString().split("T")[0]);
-    setNewStatus("대기");
+    setNewStatus("완료");
     setNewNote("");
     setAddProductId("");
     setAddVendorId("");
@@ -392,9 +392,33 @@ export default function OrdersPage() {
         const product = products.find((p) => p.id === items[0].product_id);
         const category = product?.category || "양방";
 
-        const totalPurchase = items.reduce((s, i) => s + i.purchase_price * i.quantity, 0);
-        const totalSupply = items.reduce((s, i) => s + i.supply_price * i.quantity, 0);
-        const totalMargin = totalSupply - totalPurchase;
+        // 부가세: 매입가는 부가세 포함, 납품가는 별도. 확보관리 완료 처리와 같은 기준으로 맞춘다.
+        // (이 칸들을 비워두면 주문 내역 청구액과 거래명세서가 0원으로 나온다)
+        const lines = items.map((item) => {
+          const totalPurchase = item.purchase_price * item.quantity;
+          const purchaseSupply = Math.round(totalPurchase / 1.1);
+          const lineSupply = item.supply_price * item.quantity;
+          const supplyVat = Math.round(lineSupply * 0.1);
+          return {
+            order_id: "",
+            product_id: item.product_id,
+            vendor_id: item.vendor_id,
+            raw_product_name: item.product_name,
+            edi_code: item.edi_code,
+            quantity: item.quantity,
+            purchase_price: item.purchase_price,
+            total_purchase: totalPurchase,
+            purchase_supply: purchaseSupply,
+            purchase_vat: totalPurchase - purchaseSupply,
+            supply_price: item.supply_price,
+            total_supply: lineSupply,
+            supply_vat: supplyVat,
+            billed_amount: lineSupply + supplyVat,
+            margin: lineSupply - purchaseSupply,
+          };
+        });
+        const sum = (k: keyof (typeof lines)[number]) =>
+          lines.reduce((s, l) => s + ((l[k] as number | null) ?? 0), 0);
 
         const { data: orderData, error: orderError } = await supabase
           .from("orders")
@@ -405,9 +429,12 @@ export default function OrdersPage() {
             status: newStatus,
             category,
             vendor_name: vendor?.name || "",
-            total_purchase_amount: totalPurchase,
-            total_supply_amount: totalSupply,
-            total_margin: totalMargin,
+            total_purchase_amount: sum("total_purchase"),
+            total_purchase_supply: sum("purchase_supply"),
+            total_supply_amount: sum("total_supply"),
+            total_supply_vat: sum("supply_vat"),
+            total_billed: sum("billed_amount"),
+            total_margin: sum("margin"),
             note: newNote || null,
           })
           .select("id")
@@ -415,19 +442,7 @@ export default function OrdersPage() {
 
         if (orderError || !orderData) throw orderError ?? new Error("주문 생성 실패");
 
-        const orderItems = items.map((item) => ({
-          order_id: orderData.id,
-          product_id: item.product_id,
-          vendor_id: item.vendor_id,
-          raw_product_name: item.product_name,
-          edi_code: item.edi_code,
-          quantity: item.quantity,
-          purchase_price: item.purchase_price,
-          total_purchase: item.purchase_price * item.quantity,
-          supply_price: item.supply_price,
-          total_supply: item.supply_price * item.quantity,
-          margin: (item.supply_price - item.purchase_price) * item.quantity,
-        }));
+        const orderItems = lines.map((l) => ({ ...l, order_id: orderData.id }));
 
         const { error: itemError } = await supabase.from("order_items").insert(orderItems);
         if (itemError) throw itemError;
@@ -459,11 +474,11 @@ export default function OrdersPage() {
 
   return (
     <>
-      <TopBar title="주문(기존)" subtitle="기존 주문 조회·수정 전용 화면" />
+      <TopBar title="주문(기존)" subtitle="주문 조회·수정 + 늦은 출고분 직접 등록" />
       <div className="flex-1 p-4 md:p-6 space-y-4 overflow-auto">
         {/* 일원화 안내 배너 */}
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-900">
-          <span className="font-semibold">안내</span> · 신규 주문은 이제 <a href="/sourcing" className="font-semibold underline">확보 관리</a>에서 시작하세요. 이 화면은 <b>기존 주문 조회·수정 전용</b>입니다(데이터는 그대로 보존).
+          <span className="font-semibold">안내</span> · 주문은 <a href="/sourcing" className="font-semibold underline">확보 관리</a>에서 시작하세요. 이 화면의 <b>새 주문</b>은 늦게 출고된 물건처럼 <b>확보관리로는 못 넣는 건</b>을 직접 넣을 때만 씁니다.
         </div>
 
         {/* 상단 요약 */}
@@ -495,8 +510,8 @@ export default function OrdersPage() {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          {/* 일원화 2단계: 신규 주문 등록 버튼 숨김(코드·로직은 보존). 부활은 false→true 로. */}
-          {false && (
+          {/* 늦게 출고된 물건처럼 확보관리로는 못 넣는 건을 직접 등록한다(2026-10-06 부활). */}
+          {true && (
             <button
               onClick={openModal}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 w-full sm:w-auto justify-center"
@@ -775,10 +790,12 @@ export default function OrdersPage() {
                     value={newStatus}
                     onChange={(e) => setNewStatus(e.target.value)}
                   >
-                    <option value="대기">대기</option>
-                    <option value="처리중">처리중</option>
-                    <option value="발주완료">발주완료</option>
+                    {/* DB 가 받는 값만 둔다 — 전에는 "대기/처리중/발주완료"를 보냈다가 저장이 막혔다 */}
                     <option value="완료">완료</option>
+                    <option value="접수">접수</option>
+                    <option value="확인">확인</option>
+                    <option value="출고">출고</option>
+                    <option value="도착">도착</option>
                   </select>
                 </div>
               </div>
