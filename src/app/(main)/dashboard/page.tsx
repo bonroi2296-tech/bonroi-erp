@@ -600,10 +600,11 @@ export default function DashboardPage() {
             <p className="text-sm text-gray-400 py-6 text-center">이 기간은 데이터가 없습니다</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[420px]">
+              <table className="w-full text-sm min-w-[460px]">
                 <thead>
                   <tr className="text-xs text-gray-500 border-b border-gray-200">
                     <th className="text-left font-medium py-2 w-24">지점</th>
+                    <th className="text-left font-medium py-2 w-16">구분</th>
                     {[...trend].reverse().map((t) => (
                       <th key={t.month} className="text-right font-medium py-2">
                         {t.label}
@@ -617,22 +618,20 @@ export default function DashboardPage() {
                     <Fragment key={b.id}>
                       <tr className="border-b border-gray-50">
                         <td className="py-1.5 font-medium text-gray-700" rowSpan={2}>{b.name}</td>
+                        <td className="py-1.5 text-xs text-gray-500">매출</td>
                         {[...b.months].reverse().map((m) => (
-                          <td key={m.month} className="pt-1.5 text-right tabular-nums text-gray-900">
+                          <td key={m.month} className="py-1.5 text-right tabular-nums text-gray-800">
                             {formatCurrency(m.billed)}
                           </td>
                         ))}
                       </tr>
                       <tr className="border-b border-gray-200">
+                        <td className="py-1.5 text-xs text-gray-500">마진</td>
                         {[...b.months].reverse().map((m) => {
                           const gross = m.billed - m.purchase;
-                          const rate = m.supply > 0 ? (m.margin / m.supply) * 100 : 0;
                           return (
-                            <td key={m.month} className="pb-1.5 text-right tabular-nums">
-                              <span className={`font-bold ${gross >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                                {formatCurrency(gross)}
-                              </span>
-                              <span className="ml-1.5 text-xs text-gray-400">{m.supply > 0 ? `${rate.toFixed(1)}%` : "-"}</span>
+                            <td key={m.month} className={`py-1.5 text-right tabular-nums font-bold ${gross >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                              {formatCurrency(gross)}
                             </td>
                           );
                         })}
@@ -642,40 +641,37 @@ export default function DashboardPage() {
                   {(() => {
                     const cols = [...trend].reverse().map((t) => {
                       const ms = branchTrend.map((b) => b.months.find((m) => m.month === t.month));
-                      return {
-                        month: t.month,
-                        billed: ms.reduce((a, m) => a + (m?.billed ?? 0), 0),
-                        purchase: ms.reduce((a, m) => a + (m?.purchase ?? 0), 0),
-                        margin: ms.reduce((a, m) => a + (m?.margin ?? 0), 0),
-                        supply: ms.reduce((a, m) => a + (m?.supply ?? 0), 0),
-                      };
+                      const billed = ms.reduce((a, m) => a + (m?.billed ?? 0), 0);
+                      const purchase = ms.reduce((a, m) => a + (m?.purchase ?? 0), 0);
+                      const margin = ms.reduce((a, m) => a + (m?.margin ?? 0), 0);
+                      const supply = ms.reduce((a, m) => a + (m?.supply ?? 0), 0);
+                      return { month: t.month, billed, gross: billed - purchase, margin, supply };
                     });
-                    return (
-                      <>
-                        <tr className="bg-gray-50/60">
-                          <td className="py-1.5 font-bold text-gray-900" rowSpan={2}>합계</td>
-                          {cols.map((c) => (
-                            <td key={c.month} className="pt-1.5 text-right tabular-nums font-bold text-gray-900">
-                              {formatCurrency(c.billed)}
-                            </td>
-                          ))}
-                        </tr>
-                        <tr className="bg-emerald-50/60 border-b border-gray-200">
-                          {cols.map((c) => (
-                            <td key={c.month} className="pb-1.5 text-right tabular-nums">
-                              <span className={`font-bold ${c.billed - c.purchase >= 0 ? "text-emerald-700" : "text-red-600"}`}>
-                                {formatCurrency(c.billed - c.purchase)}
+                    const ROWS = [
+                      { label: "매출", get: (c: (typeof cols)[number]) => c.billed, cls: "text-gray-900", rate: false },
+                      { label: "마진", get: (c: (typeof cols)[number]) => c.gross, cls: "text-emerald-700", rate: false },
+                      { label: "순수익", get: (c: (typeof cols)[number]) => c.margin, cls: "text-emerald-700", rate: true },
+                    ];
+                    return ROWS.map((r, idx) => (
+                      <tr key={r.label} className={`bg-emerald-50/60 ${idx === ROWS.length - 1 ? "border-b border-gray-200" : ""}`}>
+                        {idx === 0 && <td className="py-1.5 font-bold text-gray-900" rowSpan={ROWS.length}>합계</td>}
+                        <td className="py-1.5 text-xs font-medium text-gray-600">{r.label}</td>
+                        {cols.map((c) => (
+                          <td key={c.month} className={`py-1.5 text-right tabular-nums font-bold ${r.get(c) >= 0 ? r.cls : "text-red-600"}`}>
+                            {formatCurrency(r.get(c))}
+                            {r.rate && (
+                              <span className="ml-1.5 text-xs font-normal text-gray-500">
+                                {c.supply > 0 ? `${((c.margin / c.supply) * 100).toFixed(1)}%` : "-"}
                               </span>
-                              <span className="ml-1.5 text-xs text-gray-500">{c.supply > 0 ? `${((c.margin / c.supply) * 100).toFixed(1)}%` : "-"}</span>
-                            </td>
-                          ))}
-                        </tr>
-                      </>
-                    );
+                            )}
+                          </td>
+                        ))}
+                      </tr>
+                    ));
                   })()}
                 </tbody>
               </table>
-              <p className="text-xs text-gray-400 mt-2">지점마다 위는 매출, 아래 초록은 마진과 마진율입니다.</p>
+              <p className="text-xs text-gray-400 mt-2">마진 = 매출 − 매입(부가세 포함) · 순수익 = 부가세를 뺀 실제 이익 · % 는 순수익률</p>
             </div>
           )}
         </div>
