@@ -32,10 +32,21 @@ const BRANCH_EXTRA: Record<string, { phone: string; receiver: string }> =
   privateValues().branchExtra || {};
 
 // raw_product_name에서 품목명/규격 분리
-function splitProductName(raw: string): { name: string; spec: string } {
+function splitProductName(
+  raw: string,
+  product?: { name: string; spec: string | null } | null,
+): { name: string; spec: string } {
   const parts = raw.split(" ㅡ ");
   if (parts.length >= 2) {
     return { name: parts[0].trim(), spec: parts.slice(1).join(" ㅡ ").trim() };
+  }
+  // 구분자가 없는 이름: 등록된 제품의 품목명/규격으로 나눈다
+  const spec = product?.spec?.trim();
+  if (spec && raw.trim().endsWith(spec)) {
+    return { name: raw.trim().slice(0, -spec.length).trim(), spec };
+  }
+  if (product?.name && spec) {
+    return { name: product.name.trim(), spec };
   }
   return { name: raw.trim(), spec: "" };
 }
@@ -123,7 +134,8 @@ export async function GET(request: NextRequest) {
     .select(`
       id, order_number, order_date, vendor_name,
       order_items (
-        raw_product_name, quantity, supply_price, total_supply, edi_code
+        raw_product_name, quantity, supply_price, total_supply, edi_code,
+        products ( name, spec, edi_code )
       )
     `)
     .eq("branch_id", branchId)
@@ -154,19 +166,25 @@ export async function GET(request: NextRequest) {
       supply_price: number;
       total_supply: number;
       edi_code: string;
+      products: { name: string; spec: string | null; edi_code: string | null } | null;
     }> }).order_items || [];
 
     for (const item of items) {
       const rawName = item.raw_product_name;
-      if (rawName === "배송비" || rawName === "대량구매 할인" || rawName === "마일리지 소모" || rawName.includes("반품")) continue;
+      // 병원에 청구한 건 전부 나온다 — 반품(마이너스)도 포함.
+      // 빼는 건 "거래처에만 내는 돈"뿐: 배송비·할인·마일리지 줄 중 청구액이 0인 것.
+      const billed = (item.total_supply || 0) !== 0;
+      const vendorOnly = /배송비|할인|마일리지/.test(rawName);
+      if (!billed && vendorOnly) continue;
 
-      const { name, spec } = splitProductName(rawName);
+      // 주문 저장 시 이름이 한 덩어리로 들어간 건이 있어 구분자로 못 나눈다. 그때는 제품 정보로 나눈다.
+      const { name, spec } = splitProductName(rawName, item.products);
       dateGroups.get(dateKey)!.push({
         name,
         spec,
         qty: item.quantity,
         price: item.supply_price,
-        edi: item.edi_code || "",
+        edi: item.edi_code || item.products?.edi_code || "",
       });
     }
   }
@@ -327,326 +345,222 @@ export async function GET(request: NextRequest) {
   ws1.getRow(sumRow2).getCell(6).font = { name: "굴림", size: 11, bold: true };
 
   // ========== Sheet 2: 거래명세서 양식 ==========
+  // 배치·서식은 기존 수기 양식(260804_신촌면력한방병원_거래명세서.xlsx)에 맞췄다.
+  // 열: B=EDI코드 C=품목명 D=규격 E=수량 F=단가 G=공급가액 H=세액
   const ws2 = wb.addWorksheet("거래명세서 양식");
 
-  // 열 너비
-  ws2.getColumn(1).width = 2;
-  ws2.getColumn(2).width = 5.5;
-  ws2.getColumn(3).width = 11;
-  ws2.getColumn(4).width = 14;
-  ws2.getColumn(5).width = 11;
-  ws2.getColumn(6).width = 7;
-  ws2.getColumn(7).width = 11;
-  ws2.getColumn(8).width = 13;
-  ws2.getColumn(9).width = 10;
-  ws2.getColumn(10).width = 13;
-
-  // === Row 2: 타이틀 ===
-  ws2.mergeCells("B2:J2");
-  const titleCell = ws2.getRow(2).getCell(2);
-  titleCell.value = "거 래 명 세 서";
-  titleCell.font = { name: "맑은 고딕", size: 24, bold: true };
-  titleCell.alignment = { horizontal: "center", vertical: "middle" };
-  titleCell.border = {
-    top: { style: "medium" },
-    left: { style: "medium" },
-    right: { style: "medium" },
+  // 한글은 한 글자가 영문 두 칸 폭을 먹는다. 실제 값 길이로 열너비를 잡는다.
+  const cellW = (s: unknown) => {
+    const t = String(s ?? "");
+    let n = 0;
+    for (const ch of t) n += /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(ch) ? 2 : 1;
+    return n;
   };
-  ws2.getRow(2).height = 45;
+  const fit = (values: unknown[], min: number, max: number) =>
+    Math.min(max, Math.max(min, ...values.map((v) => cellW(v) + 2)));
 
-  // === Row 3: 발행일, 공급자 ===
-  ws2.getRow(3).getCell(2).value = "발 행 일";
-  styleHeaderCell(ws2.getRow(3).getCell(2), 11);
-  ws2.getRow(3).getCell(2).border = { ...thinBorder, left: { style: "medium" } };
+  const allItems = Array.from(dateGroups.values()).flat();
+  const dateLabels = Array.from(dateGroups.keys()).map((d) => `${d} 발주건`);
+  const won = (n: number) => n.toLocaleString("ko-KR");
 
-  ws2.mergeCells("C3:E3");
-  // 발행일 = 오늘 날짜 (Date 객체 + numFmt)
-  ws2.getRow(3).getCell(3).value = new Date();
-  ws2.getRow(3).getCell(3).numFmt = 'yyyy"년" m"월" d"일";@';
-  ws2.getRow(3).getCell(3).font = { name: "맑은 고딕", size: 10, bold: true };
-  ws2.getRow(3).getCell(3).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(3).getCell(3).border = thinBorder;
+  ws2.getColumn(1).width = 2.2;
+  ws2.getColumn(2).width = fit([...allItems.map((i) => i.edi), "EDI 코드"], 10, 18);
+  ws2.getColumn(3).width = fit([...allItems.map((i) => i.name), ...dateLabels, "품목명"], 20, 45);
+  ws2.getColumn(4).width = fit([...allItems.map((i) => i.spec), "규격"], 10, 24);
+  ws2.getColumn(5).width = fit([...allItems.map((i) => i.qty), "수량"], 7, 12);
+  ws2.getColumn(6).width = fit([...allItems.map((i) => won(i.price)), "단가"], 10, 16);
+  ws2.getColumn(7).width = fit([...allItems.map((i) => won(i.qty * i.price)), "공급가액", "총합계 (부가세포함)"], 12, 18);
+  ws2.getColumn(8).width = fit([...allItems.map((i) => won(Math.round(i.qty * i.price * 0.1))), "세액"], 10, 16);
+  ws2.getColumn(9).width = 3.0;
 
-  // 공급자 — F3:J3 병합
-  ws2.mergeCells("F3:J3");
-  ws2.getRow(3).getCell(6).value = "공 급 자";
-  ws2.getRow(3).getCell(6).font = { name: "맑은 고딕", size: 10, bold: true };
-  ws2.getRow(3).getCell(6).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(3).getCell(6).border = { ...thinBorder, right: { style: "medium" } };
-  ws2.getRow(3).getCell(6).fill = lightGreenFill;
+  const MED = { style: "medium" as const };
+  const THIN = { style: "thin" as const };
+  // 표 안쪽은 얇게. 굵은 선은 색칠된 칸과 문서 바깥 틀에만 쓴다(눈이 덜 아프다).
+  const frame = (r1: number, r2: number, c1 = 2, c2 = 8) => {
+    for (let r = r1; r <= r2; r++)
+      for (let c = c1; c <= c2; c++)
+        ws2.getRow(r).getCell(c).border = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+  };
+  // 마지막에 한 번 호출해 바깥 둘레만 굵게 덮어쓴다.
+  const outline = (r1: number, r2: number, c1 = 2, c2 = 8) => {
+    for (let r = r1; r <= r2; r++)
+      for (let c = c1; c <= c2; c++) {
+        const cell = ws2.getRow(r).getCell(c);
+        const b = cell.border ?? {};
+        cell.border = {
+          top: r === r1 ? MED : b.top,
+          bottom: r === r2 ? MED : b.bottom,
+          left: c === c1 ? MED : b.left,
+          right: c === c2 ? MED : b.right,
+        };
+      }
+  };
+  type PutOpt = {
+    size?: number; bold?: boolean; fill?: boolean;
+    align?: "left" | "center" | "right"; wrap?: boolean; numFmt?: string;
+  };
+  const put = (r: number, c: number, v: ExcelJS.CellValue, o: PutOpt = {}) => {
+    const cell = ws2.getRow(r).getCell(c);
+    if (v !== undefined && v !== null) cell.value = v;
+    cell.font = { name: "맑은 고딕", size: o.size ?? 10, bold: !!o.bold };
+    cell.alignment = { horizontal: o.align ?? "center", vertical: "middle", wrapText: !!o.wrap };
+    if (o.fill) {
+      cell.fill = lightGreenFill;
+      cell.border = { top: MED, bottom: MED, left: MED, right: MED }; // 색칸은 굵게
+    }
+    if (o.numFmt) cell.numFmt = o.numFmt;
+    return cell;
+  };
 
-  // === Row 4-5: 상호/사업자번호/업체명/대표 ===
-  // Row 4
-  ws2.mergeCells("B4:B5");
-  ws2.getRow(4).getCell(2).value = "상 호";
-  styleHeaderCell(ws2.getRow(4).getCell(2), 11);
-  ws2.getRow(4).getCell(2).border = { ...thinBorder, left: { style: "medium" } };
-
-  ws2.mergeCells("C4:E5");
-  ws2.getRow(4).getCell(3).value = branchName;
-  ws2.getRow(4).getCell(3).font = { name: "맑은 고딕", size: 11, bold: true };
-  ws2.getRow(4).getCell(3).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(4).getCell(3).border = thinBorder;
-
-  ws2.getRow(4).getCell(6).value = "사업자번호";
-  ws2.getRow(4).getCell(6).font = { name: "맑은 고딕", size: 9, bold: true };
-  ws2.getRow(4).getCell(6).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(4).getCell(6).border = thinBorder;
-  ws2.getRow(4).getCell(6).fill = lightGreenFill;
-
-  ws2.mergeCells("G4:J4");
-  ws2.getRow(4).getCell(7).value = SUPPLIER.bizNo;
-  styleDataCell(ws2.getRow(4).getCell(7), 10, "center");
-  ws2.getRow(4).getCell(7).border = { ...thinBorder, right: { style: "medium" } };
-
-  // Row 5
-  ws2.getRow(5).getCell(6).value = "업체명";
-  ws2.getRow(5).getCell(6).font = { name: "맑은 고딕", size: 10, bold: true };
-  ws2.getRow(5).getCell(6).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(5).getCell(6).border = thinBorder;
-  ws2.getRow(5).getCell(6).fill = lightGreenFill;
-
-  ws2.getRow(5).getCell(7).value = SUPPLIER.name;
-  ws2.getRow(5).getCell(7).font = { name: "맑은 고딕", size: 10 };
-  ws2.getRow(5).getCell(7).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(5).getCell(7).border = thinBorder;
-
-  ws2.getRow(5).getCell(8).value = "대 표";
-  ws2.getRow(5).getCell(8).font = { name: "맑은 고딕", size: 10, bold: true };
-  ws2.getRow(5).getCell(8).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(5).getCell(8).border = thinBorder;
-  ws2.getRow(5).getCell(8).fill = lightGreenFill;
-
-  ws2.mergeCells("I5:J5");
-  ws2.getRow(5).getCell(9).value = `${SUPPLIER.ceo}  (인)`;
-  ws2.getRow(5).getCell(9).font = { name: "맑은 고딕", size: 10 };
-  ws2.getRow(5).getCell(9).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(5).getCell(9).border = { ...thinBorder, right: { style: "medium" } };
-
-  // === Row 6: 주소 ===
-  ws2.getRow(6).getCell(2).value = "주 소";
-  styleHeaderCell(ws2.getRow(6).getCell(2), 11);
-  ws2.getRow(6).getCell(2).border = { ...thinBorder, left: { style: "medium" } };
-
-  ws2.mergeCells("C6:E6");
-  ws2.getRow(6).getCell(3).value = branchAddress;
-  ws2.getRow(6).getCell(3).font = { name: "맑은 고딕", size: 12, bold: true };
-  ws2.getRow(6).getCell(3).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(6).getCell(3).border = thinBorder;
-
-  ws2.getRow(6).getCell(6).value = "주 소";
-  ws2.getRow(6).getCell(6).font = { name: "맑은 고딕", size: 10, bold: true };
-  ws2.getRow(6).getCell(6).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(6).getCell(6).border = thinBorder;
-  ws2.getRow(6).getCell(6).fill = lightGreenFill;
-
-  ws2.mergeCells("G6:J6");
-  ws2.getRow(6).getCell(7).value = SUPPLIER.address;
-  ws2.getRow(6).getCell(7).font = { name: "맑은 고딕", size: 10 };
-  ws2.getRow(6).getCell(7).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(6).getCell(7).border = { ...thinBorder, right: { style: "medium" } };
-
-  // === Row 7: 총합계 / 전화 / 팩스 ===
-  ws2.getRow(7).getCell(2).value = "총 합계\n(VAT 포함)";
-  ws2.getRow(7).getCell(2).font = { name: "맑은 고딕", size: 12, bold: true };
-  ws2.getRow(7).getCell(2).alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-  ws2.getRow(7).getCell(2).border = { ...thinBorder, left: { style: "medium" } };
-  ws2.getRow(7).getCell(2).fill = lightGreenFill;
-
-  ws2.mergeCells("C7:E7");
   const invoiceLastDataRow = 9 + totalDataRows;
   const totalSumRow = invoiceLastDataRow + 1;
-  ws2.getRow(7).getCell(3).value = { formula: `E${totalSumRow}+H${totalSumRow}` };
-  ws2.getRow(7).getCell(3).numFmt = '"₩"#,##0_);[Red]("₩"#,##0)';
-  ws2.getRow(7).getCell(3).font = { name: "맑은 고딕", size: 12, bold: true };
-  ws2.getRow(7).getCell(3).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(7).getCell(3).border = thinBorder;
-  ws2.getRow(7).getCell(3).fill = lightGreenFill;
 
-  ws2.getRow(7).getCell(6).value = "전화";
-  ws2.getRow(7).getCell(6).font = { name: "맑은 고딕", size: 10, bold: true };
-  ws2.getRow(7).getCell(6).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(7).getCell(6).border = thinBorder;
-  ws2.getRow(7).getCell(6).fill = lightGreenFill;
+  // 행 높이 — 원본 양식과 동일
+  ws2.getRow(1).height = 17.25;
+  ws2.getRow(2).height = 38.25;
+  [3, 4, 5, 8].forEach((r) => (ws2.getRow(r).height = 20.25));
+  ws2.getRow(6).height = 34.5;
+  ws2.getRow(7).height = 30.75;
+  ws2.getRow(9).height = 28.5;
+  for (let r = 10; r <= invoiceLastDataRow; r++) ws2.getRow(r).height = 18;
 
-  ws2.getRow(7).getCell(7).value = SUPPLIER.phone;
-  ws2.getRow(7).getCell(7).font = { name: "맑은 고딕", size: 9 };
-  ws2.getRow(7).getCell(7).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(7).getCell(7).border = thinBorder;
+  // === Row 2: 제목 ===
+  ws2.mergeCells("B2:H2");
+  frame(2, 2);
+  put(2, 2, "거 래 명 세 서", { size: 24, bold: true });
 
-  ws2.getRow(7).getCell(8).value = "팩스";
-  ws2.getRow(7).getCell(8).font = { name: "맑은 고딕", size: 10, bold: true };
-  ws2.getRow(7).getCell(8).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(7).getCell(8).border = thinBorder;
-  ws2.getRow(7).getCell(8).fill = lightGreenFill;
+  // === Row 3: 발행일 / 공급자 ===
+  frame(3, 8);
+  put(3, 2, "발 행 일", { size: 11, bold: true, wrap: true });
+  ws2.mergeCells("C3:D3");
+  put(3, 3, new Date(), { bold: true, numFmt: 'yyyy"년" m"월" d"일";@' });
+  ws2.mergeCells("E3:H3");
+  put(3, 5, "공 급 자", { bold: true, fill: true });
 
-  ws2.mergeCells("I7:J7");
-  ws2.getRow(7).getCell(9).value = SUPPLIER.fax;
-  ws2.getRow(7).getCell(9).font = { name: "맑은 고딕", size: 9 };
-  ws2.getRow(7).getCell(9).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(7).getCell(9).border = { ...thinBorder, right: { style: "medium" } };
-  ws2.getRow(7).height = 30;
+  // === Row 4-5: 상호 / 사업자번호 / 업체명 / 대표 ===
+  ws2.mergeCells("B4:B5");
+  put(4, 2, "상 호", { size: 11, bold: true });
+  ws2.mergeCells("C4:D5");
+  put(4, 3, branchName, { size: 11, bold: true });
+  put(4, 5, "사업자번호", { size: 9, bold: true, fill: true });
+  ws2.mergeCells("F4:H4");
+  put(4, 6, SUPPLIER.bizNo, { bold: true });
+  put(5, 5, "업체명", { bold: true, fill: true });
+  put(5, 6, SUPPLIER.name, {});
+  put(5, 7, "대 표", { bold: true, fill: true });
+  put(5, 8, `${SUPPLIER.ceo}  (인)`, {});
 
-  // === Row 8: 계좌번호 (center 정렬) ===
-  ws2.mergeCells("B8:D8");
-  ws2.getRow(8).getCell(2).value = SUPPLIER.bankInfo;
-  ws2.getRow(8).getCell(2).font = { name: "맑은 고딕", size: 10, bold: true };
-  ws2.getRow(8).getCell(2).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(8).getCell(2).border = { ...thinBorder, left: { style: "medium" } };
+  // === Row 6: 주소 ===
+  put(6, 2, "주 소", { size: 11, bold: true, wrap: true });
+  ws2.mergeCells("C6:D6");
+  put(6, 3, branchAddress, { wrap: true });
+  put(6, 5, "주 소", { bold: true, fill: true });
+  ws2.mergeCells("F6:H6");
+  put(6, 6, SUPPLIER.address, { wrap: true });
 
-  // === Row 9: 컬럼 헤더 (배경색 추가) ===
-  ws2.mergeCells("B9:D9");
-  ws2.getRow(9).getCell(2).value = "품    명";
-  styleHeaderCell(ws2.getRow(9).getCell(2), 10);
-  ws2.getRow(9).getCell(2).border = { ...thinBorder, left: { style: "medium" } };
-  ws2.getRow(9).getCell(2).fill = lightGreenFill;
+  // === Row 7: 총합계 / 전화 / 팩스 ===
+  put(7, 2, "총 합계\n(VAT 포함)", { size: 12, bold: true, fill: true, wrap: true });
+  ws2.mergeCells("C7:D7");
+  put(7, 3, { formula: `G${totalSumRow}` }, {
+    size: 12, bold: true, fill: true, numFmt: '"₩"#,##0_);[Red]("₩"#,##0)',
+  });
+  put(7, 5, "전화", { bold: true, fill: true });
+  put(7, 6, SUPPLIER.phone, { size: 9 });
+  put(7, 7, "팩스", { bold: true, fill: true });
+  put(7, 8, SUPPLIER.fax, { size: 9 });
 
-  ws2.getRow(9).getCell(5).value = "규격";
-  styleHeaderCell(ws2.getRow(9).getCell(5), 10);
-  ws2.getRow(9).getCell(5).fill = lightGreenFill;
+  // === Row 8: 입금계좌 ===
+  ws2.mergeCells("C8:H8");
+  put(8, 2, "", {});
+  put(8, 3, SUPPLIER.bankInfo, { bold: true });
 
-  ws2.getRow(9).getCell(6).value = "수량";
-  styleHeaderCell(ws2.getRow(9).getCell(6), 10);
-  ws2.getRow(9).getCell(6).fill = lightGreenFill;
+  // === Row 9: 품목 머리글 ===
+  frame(9, 9);
+  const HEADERS: [number, string][] = [
+    [2, "EDI 코드"], [3, "품목명"], [4, "규격"], [5, "수량"],
+    [6, "단가"], [7, "공급가액"], [8, "세액"],
+  ];
+  HEADERS.forEach(([c, label]) => put(9, c, label, { bold: true, fill: true }));
 
-  ws2.getRow(9).getCell(7).value = "단가";
-  styleHeaderCell(ws2.getRow(9).getCell(7), 10);
-  ws2.getRow(9).getCell(7).fill = lightGreenFill;
-
-  ws2.getRow(9).getCell(8).value = "공급가액";
-  styleHeaderCell(ws2.getRow(9).getCell(8), 10);
-  ws2.getRow(9).getCell(8).fill = lightGreenFill;
-
-  ws2.getRow(9).getCell(9).value = "세액";
-  styleHeaderCell(ws2.getRow(9).getCell(9), 10);
-  ws2.getRow(9).getCell(9).fill = lightGreenFill;
-
-  ws2.getRow(9).getCell(10).value = "EDI 코드";
-  styleHeaderCell(ws2.getRow(9).getCell(10), 10);
-  ws2.getRow(9).getCell(10).border = { ...thinBorder, right: { style: "medium" } };
-  ws2.getRow(9).getCell(10).fill = lightGreenFill;
-  ws2.getRow(9).height = 22;
-
-  // === Row 10+: 데이터 행 ===
+  // === Row 10+: 품목 ===
+  const WON = '_-[$₩-412]* #,##0_-;\-[$₩-412]* #,##0_-;_-[$₩-412]* "-"??_-;_-@_-';
   let invoiceRow = 10;
   const dataStartInSheet1 = 15;
 
   for (let i = 0; i < rowTypes.length; i++) {
-    const sheet1Row = dataStartInSheet1 + i;
-    const row = ws2.getRow(invoiceRow);
+    const s1 = dataStartInSheet1 + i;
+    frame(invoiceRow, invoiceRow);
 
     if (rowTypes[i] === "date") {
-      // 날짜 헤더 행: B~J 전체 병합
-      ws2.mergeCells(invoiceRow, 2, invoiceRow, 10);
-      row.getCell(2).value = { formula: `'자료입력'!C${sheet1Row}` };
-      row.getCell(2).font = { name: "맑은 고딕", size: 10, bold: true };
-      row.getCell(2).alignment = { horizontal: "center", vertical: "middle" };
-      row.getCell(2).border = { ...thinBorder, left: { style: "medium" }, right: { style: "medium" } };
+      // 날짜 구분 행 — B~H 통째로
+      ws2.mergeCells(invoiceRow, 2, invoiceRow, 8);
+      put(invoiceRow, 2, { formula: `'자료입력'!C${s1}` }, { bold: true, fill: true });
     } else {
-      // 아이템 행
-      ws2.mergeCells(invoiceRow, 2, invoiceRow, 4);
-      row.getCell(2).value = { formula: `'자료입력'!C${sheet1Row}` };
-      row.getCell(2).font = { name: "맑은 고딕", size: 10 };
-      row.getCell(2).alignment = { horizontal: "left", vertical: "middle", wrapText: true };
-      row.getCell(2).border = { ...thinBorder, left: { style: "medium" } };
-
-      row.getCell(5).value = { formula: `'자료입력'!F${sheet1Row}` };
-      row.getCell(5).font = { name: "맑은 고딕", size: 10 };
-      row.getCell(5).alignment = { horizontal: "center", vertical: "middle" };
-      row.getCell(5).border = thinBorder;
-
-      row.getCell(6).value = { formula: `'자료입력'!G${sheet1Row}` };
-      row.getCell(6).font = { name: "맑은 고딕", size: 10 };
-      row.getCell(6).alignment = { horizontal: "center", vertical: "middle" };
-      row.getCell(6).border = thinBorder;
-
-      row.getCell(7).value = { formula: `'자료입력'!H${sheet1Row}` };
-      row.getCell(7).font = { name: "맑은 고딕", size: 10 };
-      row.getCell(7).alignment = { horizontal: "right", vertical: "middle" };
-      row.getCell(7).border = thinBorder;
-      row.getCell(7).numFmt = '"₩"#,##0';
-
-      row.getCell(8).value = { formula: `F${invoiceRow}*G${invoiceRow}` };
-      row.getCell(8).font = { name: "맑은 고딕", size: 10 };
-      row.getCell(8).alignment = { horizontal: "right", vertical: "middle" };
-      row.getCell(8).border = thinBorder;
-      row.getCell(8).numFmt = '_-[$₩-412]* #,##0_-;\\-[$₩-412]* #,##0_-;_-[$₩-412]* "-"??_-;_-@_-';
-
-      row.getCell(9).value = { formula: `F${invoiceRow}*G${invoiceRow}*10%` };
-      row.getCell(9).font = { name: "맑은 고딕", size: 10 };
-      row.getCell(9).alignment = { horizontal: "right", vertical: "middle" };
-      row.getCell(9).border = thinBorder;
-      row.getCell(9).numFmt = '_-[$₩-412]* #,##0_-;\\-[$₩-412]* #,##0_-;_-[$₩-412]* "-"??_-;_-@_-';
-
-      row.getCell(10).value = { formula: `'자료입력'!I${sheet1Row}` };
-      row.getCell(10).font = { name: "맑은 고딕", size: 10 };
-      row.getCell(10).alignment = { horizontal: "center", vertical: "middle" };
-      row.getCell(10).border = { ...thinBorder, right: { style: "medium" } };
+      put(invoiceRow, 2, { formula: `'자료입력'!I${s1}` }, {});                        // EDI
+      put(invoiceRow, 3, { formula: `'자료입력'!C${s1}` }, { align: "left", wrap: true }); // 품목명
+      put(invoiceRow, 4, { formula: `'자료입력'!F${s1}` }, { wrap: true });               // 규격
+      put(invoiceRow, 5, { formula: `'자료입력'!G${s1}` }, {});                          // 수량
+      put(invoiceRow, 6, { formula: `'자료입력'!H${s1}` }, { align: "right", numFmt: "#,##0" });
+      put(invoiceRow, 7, { formula: `E${invoiceRow}*F${invoiceRow}` }, { align: "right", numFmt: WON });
+      put(invoiceRow, 8, { formula: `E${invoiceRow}*F${invoiceRow}*10%` }, { align: "right", numFmt: WON });
     }
     invoiceRow++;
   }
 
-  // === 합계 행 ===
+  // === 총합계 행 ===
   const sumRowNum = invoiceRow;
-  const firstItemRow = 10;
-  const lastItemRow = invoiceRow - 1;
+  ws2.getRow(sumRowNum).height = 17.25;
+  frame(sumRowNum, sumRowNum);
+  ws2.mergeCells(sumRowNum, 2, sumRowNum, 6);
+  put(sumRowNum, 2, "총합계 (부가세포함)", { bold: true, fill: true });
+  ws2.mergeCells(sumRowNum, 7, sumRowNum, 8);
+  put(sumRowNum, 7, { formula: `SUM(G10:G${sumRowNum - 1},H10:H${sumRowNum - 1})` },
+      { bold: true, fill: true, align: "right", numFmt: WON });
 
-  ws2.getRow(sumRowNum).getCell(2).value = "수 량";
-  styleHeaderCell(ws2.getRow(sumRowNum).getCell(2), 10);
-  ws2.getRow(sumRowNum).getCell(2).border = { ...thinBorder, left: { style: "medium" } };
+  // === 비고 ===
+  const noteLabelRow = sumRowNum + 1;
+  ws2.getRow(noteLabelRow).height = 17.25;
+  frame(noteLabelRow, noteLabelRow);
+  ws2.mergeCells(noteLabelRow, 2, noteLabelRow, 8);
+  put(noteLabelRow, 2, "비 고", { bold: true, fill: true });
 
-  ws2.getRow(sumRowNum).getCell(3).value = { formula: `SUM(F${firstItemRow}:F${lastItemRow})` };
-  ws2.getRow(sumRowNum).getCell(3).numFmt = "#,##0";
-  ws2.getRow(sumRowNum).getCell(3).font = { name: "맑은 고딕", size: 10, bold: true };
-  ws2.getRow(sumRowNum).getCell(3).alignment = { horizontal: "center", vertical: "middle" };
-  ws2.getRow(sumRowNum).getCell(3).border = thinBorder;
+  const noteRow = noteLabelRow + 1;
+  for (let r = noteRow; r <= noteRow + 2; r++) ws2.getRow(r).height = 16.5;
+  frame(noteRow, noteRow + 2);
+  ws2.mergeCells(noteRow, 2, noteRow + 2, 8);
+  put(noteRow, 2, `1. 입금계좌: ${SUPPLIER.bankInfo}\n2. 미수금:`, { size: 9, align: "left", wrap: true });
 
-  ws2.getRow(sumRowNum).getCell(4).value = "공 급 가 액";
-  styleHeaderCell(ws2.getRow(sumRowNum).getCell(4), 10);
-
-  ws2.mergeCells(sumRowNum, 5, sumRowNum, 6);
-  ws2.getRow(sumRowNum).getCell(5).value = { formula: `SUM(H${firstItemRow}:H${lastItemRow})` };
-  ws2.getRow(sumRowNum).getCell(5).numFmt = '#,##0';
-  ws2.getRow(sumRowNum).getCell(5).font = { name: "맑은 고딕", size: 10, bold: true };
-  ws2.getRow(sumRowNum).getCell(5).alignment = { horizontal: "right", vertical: "middle" };
-  ws2.getRow(sumRowNum).getCell(5).border = thinBorder;
-
-  ws2.getRow(sumRowNum).getCell(7).value = "세액";
-  styleHeaderCell(ws2.getRow(sumRowNum).getCell(7), 10);
-
-  ws2.mergeCells(sumRowNum, 8, sumRowNum, 10);
-  ws2.getRow(sumRowNum).getCell(8).value = { formula: `SUM(I${firstItemRow}:I${lastItemRow})` };
-  ws2.getRow(sumRowNum).getCell(8).numFmt = '#,##0';
-  ws2.getRow(sumRowNum).getCell(8).font = { name: "맑은 고딕", size: 10, bold: true };
-  ws2.getRow(sumRowNum).getCell(8).alignment = { horizontal: "right", vertical: "middle" };
-  ws2.getRow(sumRowNum).getCell(8).border = { ...thinBorder, right: { style: "medium" } };
-
-  // === 기타 사항 ===
-  const noteRow1 = sumRowNum + 1;
-  ws2.mergeCells(noteRow1, 2, noteRow1, 10);
-  ws2.getRow(noteRow1).getCell(2).value = "*기타 사항";
-  ws2.getRow(noteRow1).getCell(2).font = { name: "맑은 고딕", size: 9 };
-  ws2.getRow(noteRow1).getCell(2).border = { left: { style: "medium" }, right: { style: "medium" } };
-
-  const noteRow2 = sumRowNum + 2;
-  ws2.mergeCells(noteRow2, 2, noteRow2 + 2, 10);
-  ws2.getRow(noteRow2).getCell(2).value = `1. 입금계좌: 기업은행 011-129417-04-020\n2. 예금주: 본로이\n3. 미수금:`;
-  ws2.getRow(noteRow2).getCell(2).font = { name: "맑은 고딕", size: 9 };
-  ws2.getRow(noteRow2).getCell(2).alignment = { vertical: "top", wrapText: true };
-  ws2.getRow(noteRow2).getCell(2).border = {
-    left: { style: "medium" },
-    right: { style: "medium" },
-    bottom: { style: "medium" },
+  // 병합된 색칸(공급자·총합계·머리글·비고)은 병합 범위 전체에 굵은 선을 둘러야
+  // 엑셀에서 테두리가 끊기지 않는다.
+  const medBox = (r1: number, r2: number, c1: number, c2: number) => {
+    for (let r = r1; r <= r2; r++)
+      for (let c = c1; c <= c2; c++)
+        ws2.getRow(r).getCell(c).border = { top: MED, bottom: MED, left: MED, right: MED };
   };
+  medBox(3, 3, 5, 8);                              // 공 급 자
+  medBox(4, 4, 6, 8);                              // 사업자번호 값
+  medBox(6, 6, 6, 8);                              // 공급자 주소 값
+  medBox(7, 7, 3, 4);                              // 총 합계 금액
+  medBox(9, 9, 2, 8);                              // 품목 머리글 줄
+  medBox(sumRowNum, sumRowNum, 2, 8);              // 총합계 줄
+  medBox(noteLabelRow, noteLabelRow, 2, 8);        // 비 고 줄
 
-  // 인쇄 설정
+  // 문서 바깥 둘레만 굵게 (제목~비고 박스 끝까지)
+  outline(2, noteRow + 2);
+
+  // 파일을 열면 '자료입력'이 아니라 명세서가 먼저 보이게 한다.
+  // (자료입력은 수식이 참조하는 원본 데이터 시트라 서식이 없다)
+  wb.views = [{ activeTab: 1, x: 0, y: 0, width: 10000, height: 20000, firstSheet: 0, visibility: "visible" }];
+  ws2.views = [{ showGridLines: false }];
+
+  // 인쇄 설정 — 원본 여백에 맞춤
   ws2.pageSetup = {
     paperSize: 9,
     orientation: "portrait",
     fitToPage: true,
     fitToWidth: 1,
     fitToHeight: 0,
-    margins: { left: 0.5, right: 0.5, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 },
+    margins: { left: 0.236, right: 0.236, top: 0.748, bottom: 0.748, header: 0.3, footer: 0.3 },
   };
 
   // 엑셀 버퍼 생성
