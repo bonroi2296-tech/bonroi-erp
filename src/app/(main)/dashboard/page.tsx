@@ -26,11 +26,6 @@ interface MonthAmounts {
   margin: number;
 }
 
-interface MonthComparison {
-  thisMonth: MonthAmounts;
-  lastMonth: MonthAmounts;
-}
-
 interface BranchMonthStats {
   branchId: string;
   branchName: string;
@@ -74,12 +69,6 @@ interface TrendMonth {
   합계: TrendAmounts;
 }
 
-interface VendorSpend {
-  vendor: string;
-  purchase: number;                 // 부가세 포함 매입
-  share: number;                    // 이번 달 매입 중 비중(0~1)
-}
-
 const EMPTY_MONTH: MonthAmounts = {
   purchase: 0,
   purchase_supply: 0,
@@ -91,9 +80,7 @@ const EMPTY_MONTH: MonthAmounts = {
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats>({ productCount: 0, orderCount: 0, purchaseOrderCount: 0, vendorCount: 0, totalMargin: 0 });
-  const [monthComparison, setMonthComparison] = useState<MonthComparison>({ thisMonth: EMPTY_MONTH, lastMonth: EMPTY_MONTH });
   const [trend, setTrend] = useState<TrendMonth[]>([]);
-  const [vendorSpend, setVendorSpend] = useState<VendorSpend[]>([]);
   const [branchByMonth, setBranchByMonth] = useState<Record<string, BranchMonthStats[]>>({});
   const [selMonth, setSelMonth] = useState<string>("");
   // 추이에서 볼 "마지막 달". 이 달과 앞의 두 달, 모두 3개월을 보여준다.
@@ -173,22 +160,6 @@ export default function DashboardPage() {
       }
       setBranchByMonth(byMonth);
       setSelMonth(months[months.length - 1]);
-
-      // 거래처별 매입 — 이번 달만
-      const cur = months[months.length - 1];
-      const byVendor = new Map<string, number>();
-      for (const o of rows) {
-        if (o.order_date.substring(0, 7) !== cur) continue;
-        const v = o.vendor_name || "미지정";
-        byVendor.set(v, (byVendor.get(v) || 0) + (o.total_purchase_amount || 0));
-      }
-      const total = Array.from(byVendor.values()).reduce((s, n) => s + n, 0);
-      setVendorSpend(
-        Array.from(byVendor.entries())
-          .map(([vendor, purchase]) => ({ vendor, purchase, share: total ? purchase / total : 0 }))
-          .sort((a, b) => b.purchase - a.purchase)
-          .slice(0, 8)
-      );
     }
 
     async function fetchData() {
@@ -204,11 +175,6 @@ export default function DashboardPage() {
             purchaseOrderCount: d.purchase_order_count,
             vendorCount: d.vendor_count,
             totalMargin: d.total_margin,
-          });
-          // 옛 RPC(부가세 필드 없음)로 돌아가도 화면이 깨지지 않게 기본값을 깐다.
-          setMonthComparison({
-            thisMonth: { ...EMPTY_MONTH, ...(d.this_month || {}) },
-            lastMonth: { ...EMPTY_MONTH, ...(d.last_month || {}) },
           });
           return;
         }
@@ -239,43 +205,6 @@ export default function DashboardPage() {
           totalMargin,
         });
 
-        // 월별 비교 데이터
-        const today = new Date();
-        const currentMonth = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0");
-        const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-        const lastMonthStr = lastMonth.getFullYear() + "-" + String(lastMonth.getMonth() + 1).padStart(2, "0");
-
-        type OrderRow = {
-          order_date: string;
-          branch_id: string | null;
-          total_purchase_amount: number | null;
-          total_purchase_supply: number | null;
-          total_supply_amount: number | null;
-          total_supply_vat: number | null;
-          total_billed: number | null;
-          total_margin: number | null;
-        };
-        const sumMonth = (rows: OrderRow[]): MonthAmounts =>
-          rows.reduce<MonthAmounts>(
-            (a, o) => ({
-              purchase: a.purchase + (o.total_purchase_amount || 0),
-              purchase_supply: a.purchase_supply + (o.total_purchase_supply || 0),
-              supply: a.supply + (o.total_supply_amount || 0),
-              supply_vat: a.supply_vat + (o.total_supply_vat || 0),
-              billed: a.billed + (o.total_billed || 0),
-              margin: a.margin + (o.total_margin || 0),
-            }),
-            { ...EMPTY_MONTH }
-          );
-
-        const allOrders = (ordersRes.data || []) as unknown as OrderRow[];
-        const inMonth = (m: string) => allOrders.filter((o) => o.order_date.substring(0, 7) === m);
-
-        setMonthComparison({
-          thisMonth: sumMonth(inMonth(currentMonth)),
-          lastMonth: sumMonth(inMonth(lastMonthStr)),
-        });
-
       } catch (err) {
         console.error("Dashboard fetch error:", err);
         toast.error("대시보드 데이터를 불러오지 못했습니다.");
@@ -286,6 +215,36 @@ export default function DashboardPage() {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [endMonth]);
+
+  // 지점별 3개월 추이 — 위 전체 추이와 같은 3개월을 지점으로 쪼갠 것.
+  // 막대 높이 기준(peak)은 네 지점 통틀어 가장 큰 값이라 지점끼리도 바로 비교된다.
+  const branchTrend = (() => {
+    const order: { id: string; name: string }[] = [];
+    for (const t of trend) {
+      for (const b of branchByMonth[t.month] || []) {
+        if (!order.some((o) => o.id === b.branchId)) order.push({ id: b.branchId, name: b.branchName });
+      }
+    }
+    return order.map((b) => ({
+      id: b.id,
+      name: b.name.replace("면력한방병원", ""),
+      months: trend.map((t) => {
+        const r = (branchByMonth[t.month] || []).find((x) => x.branchId === b.id);
+        return {
+          month: t.month,
+          label: t.label,
+          purchase: r?.purchase ?? 0,
+          billed: r?.billed ?? 0,
+          margin: r?.margin ?? 0,
+          supply: r?.supply ?? 0,
+        };
+      }),
+    }));
+  })();
+  const branchPeak = Math.max(
+    ...branchTrend.flatMap((b) => b.months.flatMap((m) => [m.purchase, m.billed])),
+    1
+  );
 
   const statCards = [
     { label: "등록 품목", value: stats.productCount.toLocaleString(), icon: Package, color: "bg-blue-500", change: null },
@@ -597,121 +556,65 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 이번 달 vs 지난 달 비교 */}
+        {/* 지점별 3개월 추이 — 위 전체 추이를 지점으로 쪼갠 것 */}
         <div className="bg-white rounded-xl border border-gray-200 p-4 md:p-6">
-          <h2 className="font-bold text-gray-900 text-sm md:text-base mb-4">이번 달 vs 지난 달 비교</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* 매입 (부가세 포함) */}
-            <div className="border border-gray-200 rounded-lg p-4">
-              <p className="text-xs md:text-sm text-gray-500 mb-2">
-                매입 <span className="text-gray-400">(부가세 포함)</span>
-              </p>
-              <div className="flex items-end gap-2 mb-2">
-                <div>
-                  <p className="text-lg md:text-2xl font-bold text-gray-900">{formatCurrency(monthComparison.thisMonth.purchase)}</p>
-                  <p className="text-xs text-gray-500 mt-1">이번 달</p>
-                </div>
-                <div className="flex-1 text-right">
-                  {monthComparison.lastMonth.purchase > 0 ? (
-                    <p className={`text-sm font-semibold ${
-                      monthComparison.thisMonth.purchase >= monthComparison.lastMonth.purchase ? "text-emerald-600" : "text-red-600"
-                    }`}>
-                      {((monthComparison.thisMonth.purchase / monthComparison.lastMonth.purchase - 1) * 100).toFixed(1)}%
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-              <p className="text-xs text-gray-500">지난 달: {formatCurrency(monthComparison.lastMonth.purchase)}</p>
-              <p className="text-[11px] text-gray-400 mt-1">
-                공급가액 {formatCurrency(monthComparison.thisMonth.purchase_supply)} · 마진은 이 값 기준
-              </p>
-            </div>
-
-            {/* 납품 공급가액 */}
-            <div className="border border-gray-200 rounded-lg p-4">
-              <p className="text-xs md:text-sm text-gray-500 mb-2">
-                납품 공급가액 <span className="text-gray-400">(부가세 별도)</span>
-              </p>
-              <div className="flex items-end gap-2 mb-2">
-                <div>
-                  <p className="text-lg md:text-2xl font-bold text-gray-900">{formatCurrency(monthComparison.thisMonth.supply)}</p>
-                  <p className="text-xs text-gray-500 mt-1">이번 달</p>
-                </div>
-                <div className="flex-1 text-right">
-                  {monthComparison.lastMonth.supply > 0 ? (
-                    <p className={`text-sm font-semibold ${
-                      monthComparison.thisMonth.supply >= monthComparison.lastMonth.supply ? "text-emerald-600" : "text-red-600"
-                    }`}>
-                      {((monthComparison.thisMonth.supply / monthComparison.lastMonth.supply - 1) * 100).toFixed(1)}%
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-              <p className="text-xs text-gray-500">지난 달: {formatCurrency(monthComparison.lastMonth.supply)}</p>
-              <p className="text-[11px] text-gray-400 mt-1">
-                부가세 {formatCurrency(monthComparison.thisMonth.supply_vat)} · 청구액{" "}
-                {formatCurrency(monthComparison.thisMonth.billed)}
-              </p>
-            </div>
-
-            {/* 마진 */}
-            <div className="border border-gray-200 rounded-lg p-4">
-              <p className="text-xs md:text-sm text-gray-500 mb-2">
-                마진 <span className="text-gray-400">(공급가액 기준)</span>
-              </p>
-              <div className="flex items-end gap-2 mb-2">
-                <div>
-                  <p className="text-lg md:text-2xl font-bold text-emerald-600">{formatCurrency(monthComparison.thisMonth.margin)}</p>
-                  <p className="text-xs text-gray-500 mt-1">이번 달</p>
-                </div>
-                <div className="flex-1 text-right">
-                  {monthComparison.lastMonth.margin > 0 ? (
-                    <p className={`text-sm font-semibold ${
-                      monthComparison.thisMonth.margin >= monthComparison.lastMonth.margin ? "text-emerald-600" : "text-red-600"
-                    }`}>
-                      {((monthComparison.thisMonth.margin / monthComparison.lastMonth.margin - 1) * 100).toFixed(1)}%
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-              <p className="text-xs text-gray-500">지난 달: {formatCurrency(monthComparison.lastMonth.margin)}</p>
-              <p className="text-[11px] text-gray-400 mt-1">
-                납품 공급가액 − 매입 공급가액
-                {monthComparison.thisMonth.supply > 0
-                  ? ` · ${((monthComparison.thisMonth.margin / monthComparison.thisMonth.supply) * 100).toFixed(1)}%`
-                  : ""}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* 거래처별 매입 (이번 달) */}
-        <div className="bg-white rounded-xl border border-gray-200 p-4 md:p-6">
-          <div className="flex items-baseline justify-between mb-4">
-            <h2 className="font-bold text-gray-900 text-sm md:text-base">거래처별 매입</h2>
-            <span className="text-xs text-gray-400">{Number(endMonth.slice(5))}월 · 부가세 포함</span>
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+            <h2 className="font-bold text-gray-900 text-sm md:text-base">지점별 3개월 추이</h2>
+            <span className="text-xs text-gray-400">막대 높이는 네 지점 공통 기준 · 매입·매출은 부가세 포함</span>
           </div>
 
-          {vendorSpend.length === 0 ? (
-            <p className="text-sm text-gray-400 py-8 text-center">{Number(endMonth.slice(5))}월 매입이 없습니다</p>
+          {/* 범례 */}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm mb-4">
+            {[
+              { cls: "bg-slate-300", label: "매입" },
+              { cls: "bg-blue-600", label: "매출" },
+            ].map((l) => (
+              <span key={l.label} className="flex items-center gap-1.5 text-gray-700">
+                <span className={`inline-block w-4 h-4 rounded ${l.cls}`} />
+                {l.label}
+              </span>
+            ))}
+          </div>
+
+          {branchTrend.length === 0 ? (
+            <p className="text-sm text-gray-400 py-8 text-center">이 기간은 데이터가 없습니다</p>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
-              {vendorSpend.map((v) => (
-                <div key={v.vendor}>
-                  <div className="flex items-baseline justify-between mb-1">
-                    <span className="text-sm font-medium text-gray-800 truncate">{v.vendor}</span>
-                    <span className="flex-shrink-0 ml-2">
-                      <span className="text-sm font-bold text-gray-900 tabular-nums">
-                        {formatCurrency(v.purchase)}
-                      </span>
-                      <span className="ml-1.5 text-xs text-gray-400">{(v.share * 100).toFixed(0)}%</span>
-                    </span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+              {branchTrend.map((b) => {
+                const CHART = 110;
+                const h = (v: number) => Math.max((v / branchPeak) * CHART, 2);
+                const total = b.months.reduce((s2, m) => s2 + m.billed, 0);
+                return (
+                  <div key={b.id} className="border border-gray-200 rounded-lg p-3 md:p-4">
+                    <div className="flex items-baseline justify-between mb-3">
+                      <p className="text-sm font-bold text-gray-900">{b.name}</p>
+                      <p className="text-xs text-gray-400">3개월 매출 {formatCurrency(total)}</p>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {[...b.months].reverse().map((m) => {
+                        const rate = m.supply > 0 ? (m.margin / m.supply) * 100 : 0;
+                        return (
+                          <div key={m.month}>
+                            <p className={`text-center text-sm font-bold leading-tight ${m.margin >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                              {formatCurrency(m.margin)}
+                            </p>
+                            <p className="text-center text-[11px] text-gray-400 mb-1.5">순수익 {rate.toFixed(1)}%</p>
+                            <div className="flex items-end justify-center gap-1.5 border-b border-gray-200" style={{ height: CHART }}>
+                              <div className="w-5 md:w-6 rounded-t-md bg-slate-300" style={{ height: h(m.purchase) }} title={`매입 ${formatCurrency(m.purchase)}`} />
+                              <div className="w-5 md:w-6 rounded-t-md bg-blue-600" style={{ height: h(m.billed) }} title={`매출 ${formatCurrency(m.billed)}`} />
+                            </div>
+                            <p className="text-center text-xs font-bold text-gray-900 mt-2">
+                              {m.label}
+                              {m.month === THIS_MONTH && <span className="ml-1 text-[10px] font-medium text-blue-600">이번 달</span>}
+                            </p>
+                            <p className="text-center text-[11px] text-gray-500 tabular-nums">{formatCurrency(m.billed)}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                    <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${v.share * 100}%` }} />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
