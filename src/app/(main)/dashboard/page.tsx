@@ -552,10 +552,47 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 지점별 3개월 — 위 "매입 · 매출 · 마진" 표와 같은 모양으로 맞춘다 */}
-        <div className="bg-white rounded-xl border border-gray-200 p-4 md:p-6">
-          <div className="flex items-baseline justify-between mb-2">
-            <h2 className="font-bold text-gray-900 text-sm md:text-base">지점별 3개월</h2>
+        {/* 지점별 3개월 — 위 "매입 · 매출 · 마진" 표와 같은 모양·같은 가로폭으로 맞춘다.
+            그래서 위 추이 카드와 똑같이 3칸 중 2칸을 쓴다. */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-4 md:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <h2 className="font-bold text-gray-900 text-sm md:text-base">지점별 3개월</h2>
+              {/* 위 추이와 같은 기준 월을 쓴다 — 여기서 바꿔도 위가 같이 움직인다 */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setEndMonth((m) => shiftMonth(m, -1))}
+                  className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50"
+                  title="앞 달로"
+                >
+                  ‹
+                </button>
+                <input
+                  type="month"
+                  value={endMonth}
+                  max={THIS_MONTH}
+                  onChange={(e) => e.target.value && setEndMonth(e.target.value)}
+                  className="px-2 py-1 border border-gray-200 rounded-md text-xs text-gray-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                <button
+                  onClick={() => setEndMonth((m) => (m >= THIS_MONTH ? m : shiftMonth(m, 1)))}
+                  disabled={endMonth >= THIS_MONTH}
+                  className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-30"
+                  title="뒤 달로"
+                >
+                  ›
+                </button>
+                {endMonth !== THIS_MONTH && (
+                  <button
+                    onClick={() => setEndMonth(THIS_MONTH)}
+                    className="ml-1 px-2 py-1 rounded-md text-xs text-blue-600 hover:bg-blue-50"
+                  >
+                    이번 달로
+                  </button>
+                )}
+              </div>
+            </div>
             <span className="text-xs text-gray-400">매출은 부가세 포함 · 마진은 매출 − 매입</span>
           </div>
 
@@ -641,6 +678,7 @@ export default function DashboardPage() {
               <p className="text-xs text-gray-400 mt-2">지점마다 위는 매출, 아래 초록은 마진과 마진율입니다.</p>
             </div>
           )}
+        </div>
         </div>
       </div>
     </>
