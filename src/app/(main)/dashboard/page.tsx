@@ -241,10 +241,6 @@ export default function DashboardPage() {
       }),
     }));
   })();
-  const branchPeak = Math.max(
-    ...branchTrend.flatMap((b) => b.months.flatMap((m) => [m.purchase, m.billed])),
-    1
-  );
 
   const statCards = [
     { label: "등록 품목", value: stats.productCount.toLocaleString(), icon: Package, color: "bg-blue-500", change: null },
@@ -556,95 +552,94 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 지점별 3개월 추이 — 지점명 왼쪽, 막대 오른쪽으로 한 줄씩. 두 개씩 나란히. */}
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-3 mb-2">
-            <h2 className="font-bold text-gray-900 text-sm md:text-base">지점별 3개월 추이</h2>
-            <span className="text-xs text-gray-400">
-              <span className="inline-block w-3 h-3 rounded-sm bg-slate-300 align-middle mr-1" />매입
-              <span className="inline-block w-3 h-3 rounded-sm bg-blue-600 align-middle ml-3 mr-1" />매출
-              <span className="ml-3">네 지점 공통 기준 · 부가세 포함</span>
-            </span>
+        {/* 지점별 3개월 — 위 "매입 · 매출 · 마진" 표와 같은 모양으로 맞춘다 */}
+        <div className="bg-white rounded-xl border border-gray-200 p-4 md:p-6">
+          <div className="flex items-baseline justify-between mb-2">
+            <h2 className="font-bold text-gray-900 text-sm md:text-base">지점별 3개월</h2>
+            <span className="text-xs text-gray-400">매출은 부가세 포함 · 마진은 매출 − 매입</span>
           </div>
 
           {branchTrend.length === 0 ? (
             <p className="text-sm text-gray-400 py-6 text-center">이 기간은 데이터가 없습니다</p>
           ) : (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
-                {branchTrend.map((b) => {
-                  const CHART = 40;
-                  const h = (v: number) => Math.max((v / branchPeak) * CHART, 2);
-                  return (
-                    <div key={b.id} className="flex items-end gap-3 border-b border-gray-100 py-1.5">
-                      <span className="w-10 text-xs font-bold text-gray-900 pb-0.5">{b.name}</span>
-                      <div className="flex-1 flex items-end justify-around">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[420px]">
+                <thead>
+                  <tr className="text-xs text-gray-500 border-b border-gray-200">
+                    <th className="text-left font-medium py-2 w-24">지점</th>
+                    {[...trend].reverse().map((t) => (
+                      <th key={t.month} className="text-right font-medium py-2">
+                        {t.label}
+                        {t.month === THIS_MONTH && <span className="ml-1 text-[10px] text-blue-600">이번 달</span>}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {branchTrend.map((b) => (
+                    <Fragment key={b.id}>
+                      <tr className="border-b border-gray-50">
+                        <td className="py-1.5 font-medium text-gray-700" rowSpan={2}>{b.name}</td>
                         {[...b.months].reverse().map((m) => (
-                          <div key={m.month} className="flex flex-col items-center">
-                            <div className="flex items-end gap-0.5" style={{ height: CHART }}>
-                              <div className="w-2.5 rounded-t-sm bg-slate-300" style={{ height: h(m.purchase) }} title={`${m.label} 매입 ${formatCurrency(m.purchase)}`} />
-                              <div className="w-2.5 rounded-t-sm bg-blue-600" style={{ height: h(m.billed) }} title={`${m.label} 매출 ${formatCurrency(m.billed)}`} />
-                            </div>
-                            <span className="text-[10px] text-gray-400 leading-tight mt-0.5">{m.label}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="mt-3 pt-3 border-t border-gray-200 overflow-x-auto">
-                <table className="w-full text-sm min-w-[420px]">
-                  <thead>
-                    <tr className="text-xs text-gray-500 border-b border-gray-200">
-                      <th className="text-left font-medium py-1 w-16">지점</th>
-                      {[...trend].reverse().map((t) => (
-                        <th key={t.month} className="text-right font-medium py-1">
-                          {t.label}
-                          {t.month === THIS_MONTH && <span className="ml-1 text-[10px] text-blue-600">이번 달</span>}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {branchTrend.map((b) => (
-                      <tr key={b.id} className="border-b border-gray-50">
-                        <td className="py-1 text-gray-700 font-medium">{b.name}</td>
-                        {[...b.months].reverse().map((m) => (
-                          <td key={m.month} className="py-1 text-right leading-tight">
-                            <span className="block font-bold text-gray-900 tabular-nums">{formatCurrency(m.billed)}</span>
-                            <span className={`block text-[11px] tabular-nums ${m.margin >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                              {formatCurrency(m.margin)}
-                              <span className="text-gray-400 ml-1">{m.supply > 0 ? `${((m.margin / m.supply) * 100).toFixed(1)}%` : "-"}</span>
-                            </span>
+                          <td key={m.month} className="pt-1.5 text-right tabular-nums text-gray-900">
+                            {formatCurrency(m.billed)}
                           </td>
                         ))}
                       </tr>
-                    ))}
-                    <tr className="border-b border-gray-200 bg-gray-50/60">
-                      <td className="py-1 font-bold text-gray-900">합계</td>
-                      {[...trend].reverse().map((t) => {
-                        const ms = branchTrend.map((b) => b.months.find((m) => m.month === t.month));
-                        const billed = ms.reduce((a, m) => a + (m?.billed ?? 0), 0);
-                        const margin = ms.reduce((a, m) => a + (m?.margin ?? 0), 0);
-                        const supply = ms.reduce((a, m) => a + (m?.supply ?? 0), 0);
-                        return (
-                          <td key={t.month} className="py-1 text-right leading-tight">
-                            <span className="block font-bold text-gray-900 tabular-nums">{formatCurrency(billed)}</span>
-                            <span className={`block text-[11px] tabular-nums ${margin >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                              {formatCurrency(margin)}
-                              <span className="text-gray-400 ml-1">{supply > 0 ? `${((margin / supply) * 100).toFixed(1)}%` : "-"}</span>
-                            </span>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  </tbody>
-                </table>
-                <p className="text-[11px] text-gray-400 mt-1.5">위는 매출(부가세 포함), 아래 초록은 순수익과 마진율.</p>
-              </div>
-            </>
+                      <tr className="border-b border-gray-200">
+                        {[...b.months].reverse().map((m) => {
+                          const gross = m.billed - m.purchase;
+                          const rate = m.supply > 0 ? (m.margin / m.supply) * 100 : 0;
+                          return (
+                            <td key={m.month} className="pb-1.5 text-right tabular-nums">
+                              <span className={`font-bold ${gross >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                                {formatCurrency(gross)}
+                              </span>
+                              <span className="ml-1.5 text-xs text-gray-400">{m.supply > 0 ? `${rate.toFixed(1)}%` : "-"}</span>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    </Fragment>
+                  ))}
+                  {(() => {
+                    const cols = [...trend].reverse().map((t) => {
+                      const ms = branchTrend.map((b) => b.months.find((m) => m.month === t.month));
+                      return {
+                        month: t.month,
+                        billed: ms.reduce((a, m) => a + (m?.billed ?? 0), 0),
+                        purchase: ms.reduce((a, m) => a + (m?.purchase ?? 0), 0),
+                        margin: ms.reduce((a, m) => a + (m?.margin ?? 0), 0),
+                        supply: ms.reduce((a, m) => a + (m?.supply ?? 0), 0),
+                      };
+                    });
+                    return (
+                      <>
+                        <tr className="bg-gray-50/60">
+                          <td className="py-1.5 font-bold text-gray-900" rowSpan={2}>합계</td>
+                          {cols.map((c) => (
+                            <td key={c.month} className="pt-1.5 text-right tabular-nums font-bold text-gray-900">
+                              {formatCurrency(c.billed)}
+                            </td>
+                          ))}
+                        </tr>
+                        <tr className="bg-emerald-50/60 border-b border-gray-200">
+                          {cols.map((c) => (
+                            <td key={c.month} className="pb-1.5 text-right tabular-nums">
+                              <span className={`font-bold ${c.billed - c.purchase >= 0 ? "text-emerald-700" : "text-red-600"}`}>
+                                {formatCurrency(c.billed - c.purchase)}
+                              </span>
+                              <span className="ml-1.5 text-xs text-gray-500">{c.supply > 0 ? `${((c.margin / c.supply) * 100).toFixed(1)}%` : "-"}</span>
+                            </td>
+                          ))}
+                        </tr>
+                      </>
+                    );
+                  })()}
+                </tbody>
+              </table>
+              <p className="text-xs text-gray-400 mt-2">지점마다 위는 매출, 아래 초록은 마진과 마진율입니다.</p>
+            </div>
           )}
         </div>
       </div>
