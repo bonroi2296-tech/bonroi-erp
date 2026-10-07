@@ -618,7 +618,7 @@ export default function DashboardPage() {
                     <Fragment key={b.id}>
                       <tr className="border-b border-gray-50">
                         <td className="py-1.5 font-medium text-gray-700" rowSpan={2}>{b.name}</td>
-                        <td className="py-1.5 text-xs text-gray-500">매출</td>
+                        <td className="py-1.5 text-xs font-bold text-gray-600">매출</td>
                         {[...b.months].reverse().map((m) => (
                           <td key={m.month} className="py-1.5 text-right tabular-nums text-gray-800">
                             {formatCurrency(m.billed)}
@@ -626,7 +626,7 @@ export default function DashboardPage() {
                         ))}
                       </tr>
                       <tr className="border-b border-gray-200">
-                        <td className="py-1.5 text-xs text-gray-500">마진</td>
+                        <td className="py-1.5 text-xs font-bold text-gray-600">마진</td>
                         {[...b.months].reverse().map((m) => {
                           const gross = m.billed - m.purchase;
                           return (
@@ -655,7 +655,7 @@ export default function DashboardPage() {
                     return ROWS.map((r, idx) => (
                       <tr key={r.label} className={`bg-emerald-50/60 ${idx === ROWS.length - 1 ? "border-b border-gray-200" : ""}`}>
                         {idx === 0 && <td className="py-1.5 font-bold text-gray-900" rowSpan={ROWS.length}>합계</td>}
-                        <td className="py-1.5 text-xs font-medium text-gray-600">{r.label}</td>
+                        <td className="py-1.5 text-xs font-bold text-gray-700">{r.label}</td>
                         {cols.map((c) => (
                           <td key={c.month} className={`py-1.5 text-right tabular-nums font-bold ${r.get(c) >= 0 ? r.cls : "text-red-600"}`}>
                             {formatCurrency(r.get(c))}
