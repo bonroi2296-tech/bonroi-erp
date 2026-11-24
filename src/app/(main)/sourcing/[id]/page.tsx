@@ -173,6 +173,7 @@ function ProductMatch({
       const { data } = await supabase
         .from("products")
         .select("id, name, spec")
+        .neq("category", "의약품")
         .or(`name.ilike."%${safe}%",spec.ilike."%${safe}%"`)
         .order("name")
         .limit(20);

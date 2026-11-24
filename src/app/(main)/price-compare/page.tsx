@@ -130,7 +130,7 @@ export default function PriceComparePage() {
   const toast = useToast();
   const [products, setProducts] = useState<ProductWithPrices[]>([]);
   const [loading, setLoading] = useState(true);
-  const [category, setCategory] = useState<"양방" | "한방">("양방");
+  const [category, setCategory] = useState<"양방" | "한방" | "의약품">("양방");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<"name" | "diff">("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -379,14 +379,30 @@ export default function PriceComparePage() {
         setVendorIdMap(idMap);
       }
 
-      // 이 구분에 해당하고(공통 포함) 실제로 단가가 하나라도 있는 거래처만 보여준다
+      // 이 탭 구분의 거래처는 단가가 없어도 항상 보여준다 — 열에 없으면 신규 품목
+      // 등록 창에서도 못 골라서 단가를 처음 넣을 방법이 없다(의약품 새 거래처가 그랬다).
+      // 구분이 달라도 이 탭 제품에 단가가 있으면 같이 보여준다 — 한방 제품에 붙은
+      // 양방 거래처가 열에서 통째로 빠져 최저가가 가려지는 일이 있었다.
       const priced = new Set<string>();
       Object.values(vendorPriceMap).forEach((list) => list.forEach((x) => priced.add(x.vendor_name)));
-      const order = category === "양방" ? YANGBANG_ORDER : HANBANG_ORDER;
+      const tabIds = new Set(productsData.map((p) => p.id));
+      const pricedHere = new Set<string>();
+      Object.entries(vendorPriceMap).forEach(([pid, list]) => {
+        if (tabIds.has(pid)) list.forEach((x) => pricedHere.add(x.vendor_name));
+      });
+      // 의약품은 정해진 거래처 순서가 없어 이름순으로 둔다
+      const order =
+        category === "양방" ? YANGBANG_ORDER : category === "한방" ? HANBANG_ORDER : [];
       const vendorList = ((vendorsData as { name: string; category: string | null }[]) || [])
-        .filter((v) => v.category === category || v.category === "공통")
+        .filter((v) =>
+          v.category === category
+            ? true
+            : v.category === "공통"
+            ? priced.has(v.name)
+            : pricedHere.has(v.name)
+        )
         .map((v) => v.name)
-        .filter((n) => priced.has(n) && !VENDOR_EXCLUDE.includes(n))
+        .filter((n) => !VENDOR_EXCLUDE.includes(n))
         .sort((a, b) => {
           const ia = order.indexOf(a), ib = order.indexOf(b);
           if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
@@ -702,6 +718,16 @@ export default function PriceComparePage() {
                 }`}
               >
                 한방
+              </button>
+              <button
+                onClick={() => setCategory("의약품")}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  category === "의약품"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                의약품
               </button>
             </div>
             <div className="relative flex-1 sm:flex-none">

@@ -17,7 +17,7 @@ interface Vendor {
   vendor_products: { id: string }[];
 }
 
-const CATEGORIES = ["양방", "한방", "공통"];
+const CATEGORIES = ["양방", "한방", "의약품", "공통"];
 
 export default function VendorsPage() {
   const toast = useToast();
@@ -125,6 +125,7 @@ export default function VendorsPage() {
                     <span className={`inline-block mt-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
                       vendor.category === "양방" ? "bg-blue-100 text-blue-700" :
                       vendor.category === "한방" ? "bg-orange-100 text-orange-700" :
+                      vendor.category === "의약품" ? "bg-emerald-100 text-emerald-700" :
                       "bg-gray-100 text-gray-600"
                     }`}>{vendor.category}</span>
                   </div>

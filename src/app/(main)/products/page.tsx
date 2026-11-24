@@ -121,7 +121,7 @@ export default function ProductsPage() {
             />
           </div>
           <div className="flex items-center gap-2">
-            {["전체", "양방", "한방"].map((cat) => (
+            {["전체", "양방", "한방", "의약품"].map((cat) => (
               <button
                 key={cat}
                 onClick={() => setCategoryFilter(cat)}

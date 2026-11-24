@@ -220,7 +220,7 @@ export default function OrdersPage() {
     // 기초 데이터 로드
     const [branchRes, productRes, vendorRes] = await Promise.all([
       supabase.from("branches").select("id, name, short_name"),
-      supabase.from("products").select("id, name, spec, category, supply_price, edi_code").order("name"),
+      supabase.from("products").select("id, name, spec, category, supply_price, edi_code").neq("category", "의약품").order("name"),
       supabase.from("vendors").select("id, name, category").order("name"),
     ]);
     setBranches((branchRes.data as Branch[]) || []);
