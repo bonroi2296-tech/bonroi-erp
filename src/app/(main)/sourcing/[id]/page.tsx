@@ -173,7 +173,6 @@ function ProductMatch({
       const { data } = await supabase
         .from("products")
         .select("id, name, spec")
-        .neq("category", "의약품")
         .or(`name.ilike."%${safe}%",spec.ilike."%${safe}%"`)
         .order("name")
         .limit(20);
@@ -768,7 +767,9 @@ export default function SourcingDetailPage() {
 
   // 거래처 "완료" → 주문 내역(orders/order_items)에 반영, "완료 취소" → 제거.
   // toast/refetch 없이 DB만 처리(applyReconcile 와 완료 버튼이 공유). 최신 할당을 다시 읽어 실제 수량으로 구성.
+  // 의약품은 거래처 배정·발주까지만 쓰고 장부에는 올리지 않는다. 뺀 줄 수를 돌려준다.
   const writeVendorOrder = async (g: VendorGroup, complete: boolean, fee: number) => {
+    let skippedYakpum = 0;
     // 화면에 들고 있는 값이 아니라 DB에서 다시 읽는다.
     // 완료 버튼이 연달아 눌리면 화면 값은 아직 비어 있어서 "이전 주문 없음"으로 판단하고
     // 지우지 않은 채 새 주문을 또 만든다(실제로 2026-08-18 에 같은 주문이 3건 생겼다).
@@ -805,6 +806,14 @@ export default function SourcingDetailPage() {
       const lineItems: TablesInsert<"order_items">[] = [];
       let category = "양방";
       for (const d of ((dls as unknown as DRow[]) || [])) {
+        // 의약품은 매입·매출·마진 집계에 섞이면 안 된다. 발주까지만 쓰고 장부에선 뺀다.
+        if (d.product?.category === "의약품") {
+          const here = (d.sourcing_allocations || []).some(
+            (a) => (g.vendor_id ? a.vendor_id === g.vendor_id : a.vendor_label === g.vendor_label) && billedQty(a) > 0
+          );
+          if (here) skippedYakpum++;
+          continue;
+        }
         for (const a of d.sourcing_allocations || []) {
           const inGroup = g.vendor_id ? a.vendor_id === g.vendor_id : a.vendor_label === g.vendor_label;
           if (!inGroup) continue;
@@ -837,7 +846,8 @@ export default function SourcingDetailPage() {
       }
       // 배송비는 매입만 있고 납품가 0 → 마진은 매입 공급가액만큼 마이너스.
       // 마이너스(할인)도 줄을 만든다. 예전엔 0 초과만 넣어서 할인이 주문 내역에서 사라졌다.
-      if (fee !== 0) {
+      // 의약품만 있는 발주는 품목 줄이 없다. 배송비만 달랑 있는 주문이 생기지 않게 막는다.
+      if (fee !== 0 && lineItems.length > 0) {
         const v = vatOf(fee, 0);
         lineItems.push({
           order_id: "",
@@ -906,6 +916,7 @@ export default function SourcingDetailPage() {
       });
       if (error) throw error;
     }
+    return skippedYakpum;
   };
 
   // 완료 버튼 핸들러(피드백 + 새로고침 포함).
@@ -916,8 +927,12 @@ export default function SourcingDetailPage() {
     completingRef.current.add(key);
     setCompleting(new Set(completingRef.current));
     try {
-      await writeVendorOrder(g, complete, fee);
-      toast.success(complete ? `${g.name} 완료 — 주문 내역에 올렸어요.` : `${g.name} 완료를 취소했어요.`);
+      const skipped = await writeVendorOrder(g, complete, fee);
+      toast.success(
+        complete
+          ? `${g.name} 완료 — 주문 내역에 올렸어요.${skipped ? ` 의약품 ${skipped}건은 장부에 올리지 않았어요.` : ""}`
+          : `${g.name} 완료를 취소했어요.`
+      );
       fetchJob();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "처리 중 오류");

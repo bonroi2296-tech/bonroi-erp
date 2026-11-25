@@ -85,7 +85,6 @@ export default function ParseOrderPage() {
       const { data } = await supabase
         .from("products")
         .select("id, name, spec")
-        .neq("category", "의약품")
         .ilike("name", `%${q}%`)
         .order("name")
         .limit(20);

@@ -71,9 +71,7 @@ export async function POST(request: Request) {
   if (!supabase) return NextResponse.json({ error: "DB 연결 불가" }, { status: 500 });
 
   const [{ data: products }, { data: branchRows }, { data: dlRows }] = await Promise.all([
-    // 의약품은 거래처 배정에만 쓴다. AI 목록에 넣으면 프롬프트만 커지고
-    // 소모품 주문이 의약품으로 잘못 매칭된다.
-    supabase.from("products").select("id, name, spec").neq("category", "의약품").order("name"),
+    supabase.from("products").select("id, name, spec").order("name"),
     supabase.from("branches").select("id, name").order("name"),
     supabase.from("demand_lines").select("raw_name, product_id").not("product_id", "is", null).limit(5000),
   ]);
