@@ -19,18 +19,35 @@ const DEFAULT_MODELS = [
   "gemini-2.5-flash-lite",
 ];
 
-const BUSY = /(503|429|UNAVAILABLE|overload|high demand|RESOURCE_EXHAUSTED|quota)/i;
+const BUSY = /(503|429|UNAVAILABLE|overload|high demand|RESOURCE_EXHAUSTED|quota|TIMED_OUT)/i;
 const RETIRED = /(404|NOT_FOUND|no longer available)/i;
 // thinkingConfig 같은 설정을 안 받는 모델이 있다. 그 모델만 설정 없이 한 번 더 해본다.
 const BADCONFIG = /(400|INVALID_ARGUMENT|not supported|unsupported)/i;
 
-// 라우트의 maxDuration 이 60초다. 재시도가 그걸 넘기면 사용자는 안내 문구 대신 504 를 본다.
-const BUDGET_MS = 40_000;
+// 라우트의 maxDuration 안에서 끝내야 한다. 넘기면 사용자는 안내 문구 대신 504 를 본다.
+const BUDGET_MS = 80_000;
+// 호출 하나가 늘어지면 예산 검사(호출과 호출 사이)에 걸리지 않고 라우트 제한을 통째로 먹는다.
+// 2026-11-26 에 실제로 60초 타임아웃이 났다. 모델 하나당 시간을 끊고 다음 모델로 넘긴다.
+const CALL_MS = 25_000;
+
+function callWithTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`TIMED_OUT: ${ms}ms 안에 응답이 없음`)), ms);
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); }
+    );
+  });
+}
 
 const errText = (e: unknown) => String(e instanceof Error ? e.message : e);
 
 export function isGeminiBusy(e: unknown): boolean {
   return BUSY.test(errText(e));
+}
+
+export function isGeminiTimeout(e: unknown): boolean {
+  return /TIMED_OUT/.test(errText(e));
 }
 
 export function isGeminiQuota(e: unknown): boolean {
@@ -67,7 +84,10 @@ export async function generateJson(
         try {
           const config: Record<string, unknown> = { responseMimeType: "application/json", temperature: 0 };
           if (withThinking && !model.startsWith("gemini-2.0")) config.thinkingConfig = { thinkingBudget: 0 };
-          const r = await ai.models.generateContent({ model, contents: [{ role: "user", parts }], config });
+          const r = await callWithTimeout(
+            ai.models.generateContent({ model, contents: [{ role: "user", parts }], config }),
+            Math.max(5_000, Math.min(CALL_MS, left()))
+          );
           return r.text ?? "";
         } catch (e) {
           lastErr = e;

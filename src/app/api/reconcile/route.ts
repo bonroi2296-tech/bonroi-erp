@@ -4,7 +4,7 @@ import { generateJson, isGeminiBusy, isGeminiDailyQuota, isGeminiQuota } from "@
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 interface RItem {
   line_index: number;

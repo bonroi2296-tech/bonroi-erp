@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
-import { generateJson, isGeminiBusy, isGeminiDailyQuota, isGeminiQuota } from "@/lib/gemini";
+import { generateJson, isGeminiBusy, isGeminiDailyQuota, isGeminiQuota, isGeminiTimeout } from "@/lib/gemini";
 import { createClient } from "@supabase/supabase-js";
 import { orderSpecTokens, productSpecTokens, specRelation, shouldAskSpec } from "@/lib/spec-match";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 interface GLine {
   raw_name: string;
@@ -154,6 +154,8 @@ export async function POST(request: Request) {
       ? "오늘 AI 분석 한도(무료 요금제)를 다 썼어요. 내일 다시 되거나, 구글 AI 결제를 켜면 바로 풀려요."
       : isGeminiQuota(e)
       ? "AI 사용 한도에 걸렸어요. 1분쯤 뒤에 'AI 분석'을 다시 눌러주세요."
+      : isGeminiTimeout(e)
+      ? "AI가 응답이 너무 느려요. 잠시 후 'AI 분석'을 다시 눌러주세요. 계속 그러면 주문을 나눠서 올려보세요."
       : isGeminiBusy(e)
       ? "Gemini가 지금 과부하예요. 잠시 후 'AI 분석'을 다시 눌러주세요."
       : "AI 분석에 실패했어요. 잠시 후 다시 시도해 주세요.";
