@@ -334,11 +334,13 @@ function reasonOf(d: Demand): string {
   return "";
 }
 // 정산 금액 기준 수량: 출고 확정 전(주문)이면 발주수량, 확정 후엔 실제 출고수량
+// 장부에는 실제로 확보된 것만 올린다. '주문'은 아직 확정이 아니다.
+// 예전엔 '주문'도 발주수량 전량으로 쳐서, 출고확인서에 없던 품목까지 매입·매출로 잡혔다.
+// 위쪽 '확보' 숫자(securedOf)와 기준을 같게 맞춘다.
 function billedQty(a: Alloc): number {
   if (a.status === "shipped") return a.order_qty;
   if (a.status === "partial") return a.shipped_qty ?? 0;
-  if (a.status === "unavailable") return 0;
-  return a.order_qty;
+  return 0;
 }
 // 부가세 분해. 매입가는 부가세 포함, 납품가는 부가세 별도로 잡는다.
 // 마진은 공급가액끼리 뺀 값(공급가액 - 매입공급가액) — 주문 내역 화면의 "마진(공급가액 기준)"과 같은 기준이다.
@@ -770,6 +772,7 @@ export default function SourcingDetailPage() {
   // 의약품은 거래처 배정·발주까지만 쓰고 장부에는 올리지 않는다. 뺀 줄 수를 돌려준다.
   const writeVendorOrder = async (g: VendorGroup, complete: boolean, fee: number) => {
     let skippedYakpum = 0;
+    let writtenLines = 0;
     // 화면에 들고 있는 값이 아니라 DB에서 다시 읽는다.
     // 완료 버튼이 연달아 눌리면 화면 값은 아직 비어 있어서 "이전 주문 없음"으로 판단하고
     // 지우지 않은 채 새 주문을 또 만든다(실제로 2026-08-18 에 같은 주문이 3건 생겼다).
@@ -866,6 +869,7 @@ export default function SourcingDetailPage() {
           margin: v.margin,
         });
       }
+      writtenLines = lineItems.length;
       if (lineItems.length > 0) {
         const sum = (k: keyof (typeof lineItems)[number]) =>
           lineItems.reduce((s, it) => s + ((it[k] as number | null) ?? 0), 0);
@@ -916,7 +920,7 @@ export default function SourcingDetailPage() {
       });
       if (error) throw error;
     }
-    return skippedYakpum;
+    return { skipped: skippedYakpum, written: writtenLines };
   };
 
   // 완료 버튼 핸들러(피드백 + 새로고침 포함).
@@ -927,12 +931,13 @@ export default function SourcingDetailPage() {
     completingRef.current.add(key);
     setCompleting(new Set(completingRef.current));
     try {
-      const skipped = await writeVendorOrder(g, complete, fee);
-      toast.success(
-        complete
-          ? `${g.name} 완료 — 주문 내역에 올렸어요.${skipped ? ` 의약품 ${skipped}건은 장부에 올리지 않았어요.` : ""}`
-          : `${g.name} 완료를 취소했어요.`
-      );
+      const r = await writeVendorOrder(g, complete, fee);
+      const yak = r.skipped ? ` 의약품 ${r.skipped}건은 장부에 올리지 않았어요.` : "";
+      if (!complete) toast.success(`${g.name} 완료를 취소했어요.`);
+      // 전부 '주문' 상태면 올릴 게 없다. 올렸다고 하면 안 된다.
+      else if (r.written === 0)
+        toast.error(`${g.name} — 주문 내역에 올릴 게 없어요. 품목 상태를 '출고완료'로 바꾸고 다시 눌러주세요.${yak}`);
+      else toast.success(`${g.name} 완료 — ${r.written}줄 올렸어요.${yak}`);
       fetchJob();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "처리 중 오류");
@@ -940,6 +945,25 @@ export default function SourcingDetailPage() {
       completingRef.current.delete(key);
       setCompleting(new Set(completingRef.current));
     }
+  };
+
+  // 품목을 하나씩 바꾸지 않고 이 거래처의 '주문' 상태를 한 번에 '출고완료'로 찍는다.
+  // 부분출고·출고불가는 일부러 그렇게 둔 것이라 건드리지 않는다.
+  const markAllShipped = async (g: VendorGroup) => {
+    const ids = (job?.demand_lines ?? []).flatMap((d) =>
+      (d.sourcing_allocations || [])
+        .filter((a) => (g.vendor_id ? a.vendor_id === g.vendor_id : a.vendor_label === g.vendor_label))
+        .filter((a) => a.status === "ordered")
+        .map((a) => a.id)
+    );
+    if (!ids.length) return toast.info("'주문' 상태인 품목이 없어요.");
+    const { error } = await supabase
+      .from("sourcing_allocations")
+      .update({ status: "shipped", updated_at: new Date().toISOString() })
+      .in("id", ids);
+    if (error) return toast.error(error.message);
+    toast.success(`${g.name} 품목 ${ids.length}건을 출고완료로 바꿨어요.`);
+    fetchJob();
   };
 
   // 출고확인서 분석 결과를 거래처별 할당에 반영(출고수량·단가·상태) + 배송비 정산
@@ -1125,6 +1149,7 @@ export default function SourcingDetailPage() {
                   autoFee={autoShip(g)}
                   onSaveShip={(fee) => upsertSettlement(g, { shipping_fee: fee })}
                   onComplete={(v) => toggleComplete(g, v, shipOf(g))}
+                  onMarkAllShipped={() => markAllShipped(g)}
                   busy={completing.has(g.vendor_id ?? g.vendor_label ?? "")}
                   onReconcile={() => setReconcileFor(g)}
                 />
@@ -1679,6 +1704,7 @@ function VendorOrderCard({
   autoFee,
   onSaveShip,
   onComplete,
+  onMarkAllShipped,
   busy,
   onReconcile,
 }: {
@@ -1687,6 +1713,7 @@ function VendorOrderCard({
   autoFee: number;
   onSaveShip: (fee: number) => void;
   onComplete: (v: boolean) => void;
+  onMarkAllShipped: () => void;
   busy: boolean;
   onReconcile: () => void;
 }) {
@@ -1785,6 +1812,15 @@ function VendorOrderCard({
           >
             <Upload className="w-3.5 h-3.5" /> 출고확인서
           </button>
+          {!done && (
+            <button
+              onClick={onMarkAllShipped}
+              className="flex items-center gap-1 px-2 py-1 border border-gray-200 rounded-md text-xs text-gray-700 hover:bg-gray-50"
+              title="'주문' 상태인 품목을 한 번에 '출고완료'로 바꿉니다. 부분출고·출고불가는 그대로 둡니다"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" /> 전부 출고완료
+            </button>
+          )}
           {done ? (
             <button
               onClick={() => onComplete(false)}
