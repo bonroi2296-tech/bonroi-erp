@@ -103,6 +103,7 @@ export default function QuickProductCreate({
         <select value={category} onChange={(e) => setCategory(e.target.value)} className={input}>
           <option value="양방">양방</option>
           <option value="한방">한방</option>
+          <option value="의약품">의약품</option>
         </select>
         <input value={supplyPrice} onChange={(e) => setSupplyPrice(e.target.value)} type="number" min={0} placeholder="납품가(선택)" className={input} />
         <select value={vendorId} onChange={(e) => setVendorId(e.target.value)} className={input}>
