@@ -334,9 +334,17 @@ function reasonOf(d: Demand): string {
   return "";
 }
 // 정산 금액 기준 수량: 출고 확정 전(주문)이면 발주수량, 확정 후엔 실제 출고수량
-// 장부에는 실제로 확보된 것만 올린다. '주문'은 아직 확정이 아니다.
-// 예전엔 '주문'도 발주수량 전량으로 쳐서, 출고확인서에 없던 품목까지 매입·매출로 잡혔다.
-// 위쪽 '확보' 숫자(securedOf)와 기준을 같게 맞춘다.
+// 거래처에 '발주할' 수량 — 거래처 카드 표시와 발주서 복사에 쓴다.
+// '주문' 상태도 발주는 하는 것이니 전량으로 센다. 장부 기준과 헷갈리면 안 된다.
+function orderQtyOf(a: Alloc): number {
+  if (a.status === "partial") return a.shipped_qty ?? 0;
+  if (a.status === "unavailable") return 0;
+  return a.order_qty;
+}
+
+// 장부(주문 내역)에 '올릴' 수량 — 실제로 확보된 것만.
+// '주문'은 아직 확정이 아니라 0이다. 위쪽 '확보' 숫자(securedOf)와 기준이 같다.
+// 예전엔 '주문'도 전량으로 쳐서, 출고확인서에 없던 품목까지 매입·매출로 잡혔다.
 function billedQty(a: Alloc): number {
   if (a.status === "shipped") return a.order_qty;
   if (a.status === "partial") return a.shipped_qty ?? 0;
@@ -1092,7 +1100,7 @@ export default function SourcingDetailPage() {
         };
         groupMap.set(key, g);
       }
-      const qty = billedQty(a);
+      const qty = orderQtyOf(a);
       g.subtotal += qty * (a.unit_price ?? 0);
       g.allocs.push(a);
       const label = d.product ? `${d.product.name}${d.product.spec ? ` ${d.product.spec}` : ""}` : d.raw_name;
