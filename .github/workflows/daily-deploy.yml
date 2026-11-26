@@ -1,9 +1,9 @@
-name: 매일 오후 3시 배포
+name: 매일 새벽 3시 배포
 
-# 06:00 UTC = 15:00 KST (한국 시간 오후 3시)
+# 18:00 UTC = 다음 날 03:00 KST (한국 시간 새벽 3시)
 on:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '0 18 * * *'
   workflow_dispatch:        # 급할 때 손으로 눌러서 즉시 배포
 
 permissions:
