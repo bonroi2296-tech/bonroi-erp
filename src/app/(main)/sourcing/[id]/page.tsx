@@ -732,7 +732,9 @@ export default function SourcingDetailPage() {
 
   const onStatusChange = (a: Alloc, status: string) => {
     if (status === "shipped") updateAlloc(a.id, { status, shipped_qty: a.order_qty });
-    else if (status === "partial") updateAlloc(a.id, { status, shipped_qty: a.shipped_qty ?? 0 });
+    // 0 으로 두면 그 품목이 거래처 카드·발주서에서 0개가 돼 사라진 것처럼 보인다.
+    // 발주수량을 채워두고 실제 받은 수량으로 줄이게 한다.
+    else if (status === "partial") updateAlloc(a.id, { status, shipped_qty: a.shipped_qty || a.order_qty });
     else updateAlloc(a.id, { status, shipped_qty: 0 });
   };
 
@@ -1572,12 +1574,15 @@ function AllocTable({
               </select>
               {a.status === "partial" && (
                 <input
+                  key={a.shipped_qty ?? 0}
                   type="number"
                   min={0}
+                  max={a.order_qty}
                   defaultValue={a.shipped_qty ?? 0}
+                  onFocus={(e) => e.currentTarget.select()}
                   onBlur={(e) => onShipped(a, Number(e.target.value) || 0)}
-                  className="w-20 px-2 py-1 border border-gray-200 rounded-md text-xs"
-                  title="출고 수량"
+                  className="w-20 px-2 py-1 border border-amber-300 bg-amber-50 rounded-md text-xs text-right font-medium"
+                  title={`실제 받은 수량을 적으세요 (발주 ${a.order_qty})`}
                 />
               )}
               <button
