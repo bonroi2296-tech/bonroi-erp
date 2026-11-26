@@ -69,9 +69,11 @@ interface Settlement {
 }
 // 거래처별 정산 묶음(발주건 전체의 할당을 거래처로 모음)
 interface VendorItem {
+  allocId: string;
   name: string;
   unit: string | null;
   qty: number;
+  orderQty: number;
   price: number | null;
   status: string;
 }
@@ -957,6 +959,14 @@ export default function SourcingDetailPage() {
     }
   };
 
+  // 거래처 카드에서 품목별로 상태를 바꾼다. 카드는 배정 id 만 들고 있다.
+  const setAllocStatus = (allocId: string, status: string) => {
+    const a = (job?.demand_lines ?? [])
+      .flatMap((d) => d.sourcing_allocations || [])
+      .find((x) => x.id === allocId);
+    if (a) onStatusChange(a, status);
+  };
+
   // 품목을 하나씩 바꾸지 않고 이 거래처의 '주문' 상태를 한 번에 '출고완료'로 찍는다.
   // 부분출고·출고불가는 일부러 그렇게 둔 것이라 건드리지 않는다.
   const markAllShipped = async (g: VendorGroup) => {
@@ -1106,7 +1116,15 @@ export default function SourcingDetailPage() {
       g.subtotal += qty * (a.unit_price ?? 0);
       g.allocs.push(a);
       const label = d.product ? `${d.product.name}${d.product.spec ? ` ${d.product.spec}` : ""}` : d.raw_name;
-      g.items.push({ name: label, unit: d.unit_label, qty, price: a.unit_price, status: a.status });
+      g.items.push({
+        allocId: a.id,
+        name: label,
+        unit: d.unit_label,
+        qty,
+        orderQty: a.order_qty,
+        price: a.unit_price,
+        status: a.status,
+      });
     }
   }
   const groups = Array.from(groupMap.values()).sort((x, y) => y.subtotal - x.subtotal);
@@ -1160,6 +1178,7 @@ export default function SourcingDetailPage() {
                   onSaveShip={(fee) => upsertSettlement(g, { shipping_fee: fee })}
                   onComplete={(v) => toggleComplete(g, v, shipOf(g))}
                   onMarkAllShipped={() => markAllShipped(g)}
+                  onItemStatus={setAllocStatus}
                   busy={completing.has(g.vendor_id ?? g.vendor_label ?? "")}
                   onReconcile={() => setReconcileFor(g)}
                 />
@@ -1718,6 +1737,7 @@ function VendorOrderCard({
   onSaveShip,
   onComplete,
   onMarkAllShipped,
+  onItemStatus,
   busy,
   onReconcile,
 }: {
@@ -1727,6 +1747,7 @@ function VendorOrderCard({
   onSaveShip: (fee: number) => void;
   onComplete: (v: boolean) => void;
   onMarkAllShipped: () => void;
+  onItemStatus: (allocId: string, status: string) => void;
   busy: boolean;
   onReconcile: () => void;
 }) {
@@ -1765,7 +1786,9 @@ function VendorOrderCard({
         >
           {isLater ? "후책정" : "자동"}
         </span>
-        <span className="text-xs text-gray-400">{orderItems.length}품목</span>
+        <span className="text-xs text-gray-400">
+          확정 {orderItems.filter((it) => it.status !== "ordered").length}/{orderItems.length}품목
+        </span>
         {done && (
           <span className="inline-flex items-center gap-0.5 text-[10px] text-emerald-700 font-medium">
             <CheckCircle2 className="w-3 h-3" /> 완료
@@ -1784,7 +1807,33 @@ function VendorOrderCard({
         <tbody>
           {orderItems.map((it, i) => (
             <tr key={i} className="border-b border-gray-50 last:border-0">
-              <td className="px-3 py-1.5 text-gray-900">{it.name}</td>
+              <td className="pl-3 pr-1 py-1.5 w-6">
+                {it.status === "partial" ? (
+                  <span
+                    className="text-[10px] font-medium text-amber-700"
+                    title={`부분출고 ${it.qty}/${it.orderQty} — 수량은 아래 품목표에서 고칩니다`}
+                  >
+                    부분
+                  </span>
+                ) : (
+                  <input
+                    type="checkbox"
+                    checked={it.status === "shipped"}
+                    disabled={done}
+                    onChange={(e) => onItemStatus(it.allocId, e.target.checked ? "shipped" : "ordered")}
+                    className="align-middle cursor-pointer disabled:cursor-not-allowed"
+                    title={
+                      done
+                        ? "완료된 거래처입니다. 바꾸려면 먼저 완료를 취소하세요"
+                        : it.status === "shipped"
+                        ? "출고완료 — 누르면 '주문'으로 되돌립니다"
+                        : "출고완료로 표시 — 완료하면 주문 내역에 올라갑니다"
+                    }
+                    aria-label={`${it.name} 출고완료`}
+                  />
+                )}
+              </td>
+              <td className={`px-1 py-1.5 ${it.status === "ordered" ? "text-gray-400" : "text-gray-900"}`}>{it.name}</td>
               <td className="px-2 py-1.5 text-right text-gray-700 whitespace-nowrap">
                 {it.qty}
                 {it.unit ?? ""}
